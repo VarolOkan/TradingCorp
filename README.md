@@ -31,14 +31,14 @@ over Socket.IO, and renders the result in a React single-page app.
 ## Architecture
 
 ```
-┌────────────────────────┐      Socket.IO (real-time)     ┌──────────────────────────┐
-│  React + Vite SPA       │  ───────────────────────────▶ │  Express + Socket.IO      │
-│  (frontend/)            │  request_analysis / config     │  server (src/server/)     │
-│  - AnalysisForm         │  request_analysis / config     │  FinancialAnalysisGraph    │
-│  - ResultsPanel         │                                │  (LangGraph orchestration) │
-│  - RelationsGraphView   │  ◀─────────────────────────── │                           │
-│  - SettingsDialog       │  analysis_start / complete /   │                           │
-└────────────────────────┘                                └──────────────────────────┘
+┌────────────────────────┐      Socket.IO (real-time)    ┌────────────────────────────┐
+│  React + Vite SPA      │  ───────────────────────────▶ │  Express + Socket.IO       │
+│  (frontend/)           │  request_analysis / config    │  server (src/server/)      │
+│  - AnalysisForm        │  request_analysis / config    │  FinancialAnalysisGraph    │
+│  - ResultsPanel        │                               │  (LangGraph orchestration) │
+│  - RelationsGraphView  │  ◀─────────────────────────── │                            │
+│  - SettingsDialog      │  analysis_start / complete /  │                            │
+└────────────────────────┘                               └────────────────────────────┘
         │                                                          │
         │ POST /config (Option B)                                 ▼
         └─────────────────────────────────────────   Specialist agents → Governance gatekeeper
