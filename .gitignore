@@ -1,0 +1,20 @@
+frontend/dist
+coverage
+frontend/coverage-ui/lcov-report
+node_modules
+
+# Encrypted server-side token vault (contains LLM tokens). Never commit.
+.vault/
+
+# Plaintext per-user LLM *selection* store (provider/baseUrl/model + agency
+# overrides) — runtime state, survives restart, NOT a secret but never commit.
+.data/
+llm-config.db
+llm-config.db-shm
+llm-config.db-wal
+
+# Generated reports (CEO/CFO export artifacts; per-day dirs under reports/).
+reports/
+frontend/coverage-ui/
+logs/
+tmp/

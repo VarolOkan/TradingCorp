@@ -1,0 +1,437 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Financial Analysis Pipeline — REST API",
+    "version": "1.0.0",
+    "description": "REST surface of the Financial Analysis Pipeline analysis server (Express + Socket.IO on :3001). Covers connection config, LLM provider config, per-analyst source credentials / weights / flavors, market data (quote, history, options history, company news + sentiment), the Stock Screener, the multi-agent registry (agencies + analysts CRUD), and report persistence. Realtime analysis streaming itself is delivered over Socket.IO (out of scope for this REST doc).",
+    "contact": { "name": "Financial Analysis Pipeline" }
+  },
+  "servers": [
+    { "url": "http://localhost:3001", "description": "Local dev server" }
+  ],
+  "tags": [
+    { "name": "system", "description": "Health + static config" },
+    { "name": "connection", "description": "Runtime backend connection settings" },
+    { "name": "llm-config", "description": "LLM provider/model configuration + connection test" },
+    { "name": "analyst-config", "description": "Per-analyst source credentials" },
+    { "name": "analyst-params", "description": "Per-analyst tunable weights" },
+    { "name": "analyst-flavors", "description": "Per-analyst Role & Instructions (flavors)" },
+    { "name": "market-data", "description": "Quote, history, options history, company news + sentiment" },
+    { "name": "screener", "description": "Top-N most-promising tickers for the selected agency (LLM-free, fast)" },
+    { "name": "server-log", "description": "Live server log tail" },
+    { "name": "registry", "description": "Agencies + analysts (catalog, CRUD)" },
+    { "name": "reports", "description": "Report persistence + downloads" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["system"],
+        "summary": "Health check",
+        "responses": {
+          "200": { "description": "Server is alive", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } } }
+        }
+      }
+    },
+    "/config": {
+      "get": {
+        "tags": ["connection"],
+        "summary": "Static analysis configuration",
+        "responses": {
+          "200": { "description": "Static config (analysis defaults + version)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConfigStatic" } } } }
+        }
+      },
+      "post": {
+        "tags": ["connection"],
+        "summary": "Save runtime connection settings",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConnectionSettings" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConfigSaved" } } } },
+          "400": { "description": "Invalid settings", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/llm-config": {
+      "get": {
+        "tags": ["llm-config"],
+        "summary": "Get LLM configs + per-agency model role",
+        "parameters": [
+          { "name": "sessionId", "in": "query", "schema": { "type": "string" } },
+          { "name": "agencyId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Configs", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LlmConfigGet" } } } }
+        }
+      },
+      "post": {
+        "tags": ["llm-config"],
+        "summary": "Replace the 3 role configs (+ optional agency override)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LlmConfigPost" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "configs": { "type": "array", "items": { "$ref": "#/components/schemas/LlmModelConfigPublic" } }, "agencyModelRole": { "type": "string", "nullable": true } } } } } },
+          "400": { "description": "Invalid config", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/llm-config/status": {
+      "get": {
+        "tags": ["llm-config"],
+        "summary": "Which roles are live (configured) + vault health",
+        "responses": {
+          "200": { "description": "Status snapshot", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/llm-config/test": {
+      "post": {
+        "tags": ["llm-config"],
+        "summary": "Probe a provider URI + token with a lightweight request",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LlmConfigTest" } } } },
+        "responses": {
+          "200": { "description": "Probe result", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/analyst-config": {
+      "get": {
+        "tags": ["analyst-config"],
+        "summary": "Catalog of analysts needing a per-source token",
+        "responses": {
+          "200": { "description": "Catalog", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystConfigCatalog" } } } }
+        }
+      },
+      "post": {
+        "tags": ["analyst-config"],
+        "summary": "Store one source credential (token never echoed)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystConfigPost" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } } },
+          "400": { "description": "Invalid", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/analyst-params": {
+      "get": {
+        "tags": ["analyst-params"],
+        "summary": "Saved weights for an agency",
+        "parameters": [
+          { "name": "sessionId", "in": "query", "schema": { "type": "string" } },
+          { "name": "agencyId", "in": "query", "schema": { "type": "string", "default": "long-term" } }
+        ],
+        "responses": {
+          "200": { "description": "Params", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystParamsGet" } } } },
+          "404": { "description": "Unknown agency", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "post": {
+        "tags": ["analyst-params"],
+        "summary": "Store one analyst's weight overrides",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystParamsPost" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } } },
+          "400": { "description": "Invalid", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Analyst not in agency", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/analyst-flavors": {
+      "get": {
+        "tags": ["analyst-flavors"],
+        "summary": "Resolved flavor set for one analyst",
+        "parameters": [
+          { "name": "sessionId", "in": "query", "schema": { "type": "string" } },
+          { "name": "agencyId", "in": "query", "schema": { "type": "string", "default": "long-term" } },
+          { "name": "analystId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Flavors", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystFlavorsGet" } } } },
+          "404": { "description": "Unknown agency", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "post": {
+        "tags": ["analyst-flavors"],
+        "summary": "Replace a user's flavor set + selection",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystFlavorsPost" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } } },
+          "400": { "description": "Invalid flavor set", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/analyst-flavors/agency-summary": {
+      "get": {
+        "tags": ["analyst-flavors"],
+        "summary": "LLM enabled/disabled summary for an agency",
+        "parameters": [
+          { "name": "sessionId", "in": "query", "schema": { "type": "string" } },
+          { "name": "agencyId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Summary", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/analyst-flavors/bulk-enable-llm": {
+      "post": {
+        "tags": ["analyst-flavors"],
+        "summary": "Enable/disable LLM for all analysts in an agency",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "sessionId": { "type": "string" }, "agencyId": { "type": "string" }, "enabled": { "type": "boolean" } } } } } },
+        "responses": {
+          "200": { "description": "Done", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/quote": {
+      "get": {
+        "tags": ["market-data"],
+        "summary": "Latest quote for a symbol",
+        "parameters": [ { "name": "symbol", "in": "query", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Quote" },
+          "400": { "description": "Missing symbol", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "description": "Fetch failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/history": {
+      "get": {
+        "tags": ["market-data"],
+        "summary": "Historical OHLCV price bars",
+        "parameters": [
+          { "name": "symbol", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "interval", "in": "query", "schema": { "type": "string", "default": "1d" } },
+          { "name": "lookback", "in": "query", "schema": { "type": "integer", "default": 90 } }
+        ],
+        "responses": {
+          "200": { "description": "Price bars" },
+          "400": { "description": "Missing symbol", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "description": "Fetch failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/options-history": {
+      "get": {
+        "tags": ["market-data"],
+        "summary": "Historical options chain",
+        "parameters": [ { "name": "symbol", "in": "query", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Option chain (+ per-strike greeks)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OptionChainResult" } } } },
+          "400": { "description": "Missing symbol", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "description": "Fetch failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/news": {
+      "get": {
+        "tags": ["market-data"],
+        "summary": "Company news + deterministic sentiment for a symbol",
+        "parameters": [ { "name": "symbol", "in": "query", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "News + aggregate sentiment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewsResult" } } } },
+          "400": { "description": "Missing symbol", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "description": "News fetch failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/screener": {
+      "get": {
+        "tags": ["screener"],
+        "summary": "Top-N most-promising tickers for the selected agency",
+        "description": "Scores a candidate universe against the SELECTED AGENCY's analyst composition using only cheap, LLM-free signals (price bars for technical/momentum/volatility + company news for sentiment). Bounded-concurrency pool keeps it fast. The response includes elapsedMs + per-axis scores + the topAxis tag so the UI can label why each ticker ranked.",
+        "parameters": [
+          { "name": "agencyId", "in": "query", "schema": { "type": "string", "default": "long-term" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 25, "default": 8 } },
+          { "name": "universe", "in": "query", "schema": { "type": "string", "description": "Optional space/comma-separated candidate tickers (defaults to a built-in universe)" } },
+          { "name": "interval", "in": "query", "schema": { "type": "string", "enum": ["1m", "5m", "1d"], "default": "1d" } },
+          { "name": "lookbackDays", "in": "query", "schema": { "type": "integer", "default": 90 } }
+        ],
+        "responses": {
+          "200": { "description": "Screened top-N", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ScreenerResult" } } } },
+          "500": { "description": "Screener failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/server-log": {
+      "get": {
+        "tags": ["server-log"],
+        "summary": "Tail of the persistent server log (text/plain)",
+        "parameters": [ { "name": "lines", "in": "query", "schema": { "type": "integer", "default": 200, "maximum": 2000 } } ],
+        "responses": {
+          "200": { "description": "Log text", "content": { "text/plain": { "schema": { "type": "string" } } } }
+        }
+      }
+    },
+    "/registry": {
+      "get": {
+        "tags": ["registry"],
+        "summary": "Analyst catalog + agencies",
+        "parameters": [ { "name": "userId", "in": "query", "schema": { "type": "string", "default": "default" } } ],
+        "responses": {
+          "200": { "description": "Catalog + agencies", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegistryGet" } } } }
+        }
+      }
+    },
+    "/registry/agency": {
+      "post": {
+        "tags": ["registry"],
+        "summary": "Create a new agency",
+        "parameters": [ { "name": "userId", "in": "query", "schema": { "type": "string", "default": "default" } } ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgencyDef" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "id": { "type": "string" }, "agency": { "$ref": "#/components/schemas/AgencySummary" }, "driver": { "type": "string" } } } } } },
+          "400": { "description": "Invalid agency", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "Duplicate id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/registry/agency/{id}": {
+      "put": {
+        "tags": ["registry"],
+        "summary": "Set an agency's analyst flow (ordered refs + optional feeds-into)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "userId", "in": "query", "schema": { "type": "string", "default": "default" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgencyMembership" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "id": { "type": "string" }, "analysts": { "type": "array", "items": { "$ref": "#/components/schemas/AgencyAnalystRef" } } } } } } },
+          "400": { "description": "Invalid", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["registry"],
+        "summary": "Delete a (non-default) agency",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "userId", "in": "query", "schema": { "type": "string", "default": "default" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkId" } } } },
+          "400": { "description": "Cannot delete default", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/registry/analyst": {
+      "post": {
+        "tags": ["registry"],
+        "summary": "Create a custom analyst",
+        "parameters": [ { "name": "userId", "in": "query", "schema": { "type": "string", "default": "default" } } ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystDefCreate" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "id": { "type": "string" }, "analyst": { "$ref": "#/components/schemas/AnalystDefCreate" }, "driver": { "type": "string" } } } } } },
+          "400": { "description": "Invalid analyst", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "Built-in or duplicate", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/registry/analyst/{id}": {
+      "put": {
+        "tags": ["registry"],
+        "summary": "Edit a custom analyst",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "userId", "in": "query", "schema": { "type": "string", "default": "default" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalystDefCreate" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "id": { "type": "string" }, "analyst": { "$ref": "#/components/schemas/AnalystDefCreate" }, "driver": { "type": "string" } } } } } },
+          "400": { "description": "Invalid / built-in", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["registry"],
+        "summary": "Delete a custom analyst",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "userId", "in": "query", "schema": { "type": "string", "default": "default" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkId" } } } },
+          "400": { "description": "Built-in", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/reports": {
+      "post": {
+        "tags": ["reports"],
+        "summary": "Build + persist a report from an analysis result",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "result": { "type": "object" }, "meta": { "type": "object" } } } } } },
+        "responses": {
+          "200": { "description": "Persisted", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "Missing result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Build failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "get": {
+        "tags": ["reports"],
+        "summary": "List saved reports (newest first, grouped by day)",
+        "responses": {
+          "200": { "description": "List", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/reports/day/{day}": {
+      "get": {
+        "tags": ["reports"],
+        "summary": "Reports for one YYYY-MM-DD",
+        "parameters": [ { "name": "day", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Day list", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/reports/{id}": {
+      "get": {
+        "tags": ["reports"],
+        "summary": "Download a report",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["pdf", "md", "html", "json"], "default": "pdf" } }
+        ],
+        "responses": { "200": { "description": "File" }, "404": { "description": "Not found" } }
+      },
+      "delete": {
+        "tags": ["reports"],
+        "summary": "Delete a report + all its generated files",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "Invalid id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": { "type": "object", "properties": { "status": { "type": "string", "example": "OK" }, "timestamp": { "type": "string", "format": "date-time" } } },
+      "Error": { "type": "object", "properties": { "error": { "type": "string" }, "details": { "type": "array", "items": { "type": "string" } } } },
+      "OkId": { "type": "object", "properties": { "ok": { "type": "boolean" }, "id": { "type": "string" }, "driver": { "type": "string" } } },
+      "ConnectionSettings": { "type": "object", "required": ["baseUri"], "properties": { "baseUri": { "type": "string", "example": "http://localhost:3001" }, "accessToken": { "type": "string" }, "extra": { "type": "object", "additionalProperties": { "type": "string" } }, "parallelAnalysts": { "type": "boolean" } } },
+      "ConfigStatic": { "type": "object", "properties": { "analysis": { "type": "object" }, "version": { "type": "string" } } },
+      "ConfigSaved": { "type": "object", "properties": { "ok": { "type": "boolean" }, "sessionId": { "type": "string" }, "baseUri": { "type": "string" }, "hasToken": { "type": "boolean" }, "extraKeys": { "type": "array", "items": { "type": "string" } } } },
+      "LlmModelConfigPublic": { "type": "object", "properties": { "role": { "type": "string", "enum": ["deep-thought", "scanner", "flexible"] }, "provider": { "type": "string" }, "baseUrl": { "type": "string" }, "model": { "type": "string" }, "hasToken": { "type": "boolean" } } },
+      "LlmConfigGet": { "type": "object", "properties": { "configs": { "type": "array", "items": { "$ref": "#/components/schemas/LlmModelConfigPublic" } }, "agencyModelRole": { "type": "string", "nullable": true } } },
+      "LlmConfigPost": { "type": "object", "properties": { "configs": { "type": "array", "items": { "type": "object", "properties": { "role": { "type": "string" }, "provider": { "type": "string" }, "baseUrl": { "type": "string" }, "model": { "type": "string" }, "token": { "type": "string" } } } }, "agencyId": { "type": "string" }, "agencyModelRole": { "type": "string", "nullable": true }, "sessionId": { "type": "string" } } },
+      "LlmConfigTest": { "type": "object", "properties": { "role": { "type": "string" }, "provider": { "type": "string" }, "baseUrl": { "type": "string" }, "model": { "type": "string" }, "token": { "type": "string" } } },
+      "AnalystConfigCatalog": { "type": "object", "properties": { "analysts": { "type": "array", "items": { "type": "object", "properties": { "analystId": { "type": "string" }, "name": { "type": "string" }, "sources": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "label": { "type": "string" }, "auth": { "type": "string" } } } } } } } } },
+      "AnalystConfigPost": { "type": "object", "properties": { "sessionId": { "type": "string" }, "analystId": { "type": "string" }, "sourceId": { "type": "string" }, "token": { "type": "string" } } },
+      "AnalystParamsGet": { "type": "object", "properties": { "sessionId": { "type": "string" }, "agencyId": { "type": "string" }, "params": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": { "type": "number" } } } } },
+      "AnalystParamsPost": { "type": "object", "properties": { "sessionId": { "type": "string" }, "agencyId": { "type": "string" }, "analystId": { "type": "string" }, "params": { "type": "object", "additionalProperties": { "type": "number" } } } },
+      "AnalystFlavorsGet": { "type": "object", "properties": { "flavors": { "type": "array", "items": { "type": "object" } }, "selectedId": { "type": "string", "nullable": true } } },
+      "AnalystFlavorsPost": { "type": "object", "properties": { "sessionId": { "type": "string" }, "agencyId": { "type": "string" }, "analystId": { "type": "string" }, "flavors": { "type": "array", "items": { "type": "object" } }, "selectedId": { "type": "string" } } },
+      "RegistryGet": { "type": "object", "properties": { "catalog": { "type": "array", "items": { "type": "object" } }, "agencies": { "type": "array", "items": { "$ref": "#/components/schemas/AgencySummary" } }, "driver": { "type": "string" } } },
+      "AgencySummary": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "horizon": { "type": "string" }, "instrument": { "type": "string", "enum": ["EQUITY", "OPTION"] }, "analystCount": { "type": "integer" }, "isDefault": { "type": "boolean" } } },
+      "AgencyAnalystRef": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "role": { "type": "string" }, "params": { "type": "object" } } },
+      "AgencyMembership": { "type": "object", "properties": { "analysts": { "type": "array", "items": { "$ref": "#/components/schemas/AgencyAnalystRef" } }, "feedInto": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } } } },
+      "AgencyDef": { "type": "object", "required": ["id", "name", "horizon", "analysts"], "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "description": { "type": "string" }, "horizon": { "type": "string", "enum": ["INTRADAY", "SHORT_TERM", "MEDIUM_TERM", "LONG_TERM"] }, "instrument": { "type": "string", "enum": ["EQUITY", "OPTION"] }, "default": { "type": "boolean" }, "analysts": { "type": "array", "items": { "$ref": "#/components/schemas/AgencyAnalystRef" } } } },
+      "AnalystDefCreate": { "type": "object", "required": ["id", "name", "kind", "stage", "logic"], "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "kind": { "type": "string", "enum": ["orchestrator", "ingestion", "analyst", "gatekeeper"] }, "role": { "type": "string" }, "stage": { "type": "integer", "enum": [1, 2, 3] }, "accent": { "type": "string" }, "dependsOn": { "type": "array", "items": { "type": "string" } }, "dataSources": { "type": "array", "items": { "type": "object" } }, "logic": { "type": "object" }, "output": { "type": "object" } } },
+      "NewsHeadline": { "type": "object", "properties": { "title": { "type": "string" }, "url": { "type": "string" }, "source": { "type": "string" }, "timestamp": { "type": "string", "format": "date-time" }, "sentiment": { "type": "string", "enum": ["VERY_POSITIVE", "POSITIVE", "NEUTRAL", "NEGATIVE", "VERY_NEGATIVE"] }, "score": { "type": "integer", "minimum": -100, "maximum": 100 } } },
+      "NewsResult": { "type": "object", "properties": { "ticker": { "type": "string" }, "headlines": { "type": "array", "items": { "$ref": "#/components/schemas/NewsHeadline" } }, "sentiment_score": { "type": "integer", "minimum": -100, "maximum": 100, "description": "Mean of headline scores, -100..+100" }, "sentiment_label": { "type": "string" }, "source": { "type": "string", "enum": ["finnhub", "mock"] }, "note": { "type": "string" } } },
+      "ScreenerRow": { "type": "object", "properties": { "ticker": { "type": "string" }, "promise": { "type": "number", "minimum": 0, "maximum": 100, "description": "Blended promise score for this agency" }, "technical": { "type": "number", "minimum": 0, "maximum": 100 }, "sentiment": { "type": "number", "minimum": -100, "maximum": 100 }, "momentum": { "type": "number", "minimum": 0, "maximum": 100 }, "stability": { "type": "number", "minimum": 0, "maximum": 100 }, "verdict": { "type": "string", "enum": ["STRONG", "WATCH", "WEAK"] }, "topAxis": { "type": "string", "enum": ["technical", "sentiment", "fundamental", "risk", "onchain"] } } },
+      "ScreenerResult": { "type": "object", "properties": { "agencyId": { "type": "string" }, "weights": { "type": "object", "additionalProperties": { "type": "number" }, "description": "Axis blend weights derived from the agency's analyst composition" }, "rows": { "type": "array", "items": { "$ref": "#/components/schemas/ScreenerRow" } }, "universeSize": { "type": "integer" }, "screenedAt": { "type": "string", "format": "date-time" }, "elapsedMs": { "type": "number", "description": "Wall-clock ms the screen took (proves it is fast)" }, "note": { "type": "string" } } },
+      "OptionQuote": { "type": "object", "properties": { "expiry": { "type": "string", "format": "date" }, "strike": { "type": "number" }, "type": { "type": "string", "enum": ["C", "P"] }, "bid": { "type": "number" }, "ask": { "type": "number" }, "last": { "type": "number" }, "volume": { "type": "number" }, "open_interest": { "type": "number" }, "iv": { "type": "number", "description": "Implied volatility (fraction, e.g. 0.32 = 32%)" }, "underlying_price": { "type": "number" }, "underlying_ts": { "type": "string", "format": "date-time" } } },
+      "GreeksRow": { "type": "object", "description": "Per-strike Black–Scholes greeks re-derived from each quote's IV. Raw BS units: vega per 1.00 vol (100 vol-pts), theta per year. The UI scales vega/100 (per vol-point) and theta/365 (per day).", "properties": { "expiry": { "type": "string", "format": "date" }, "strike": { "type": "number" }, "type": { "type": "string", "enum": ["C", "P"] }, "delta": { "type": "number", "description": "Call in [0,1], put in [-1,0]" }, "gamma": { "type": "number" }, "vega": { "type": "number", "description": "Raw BS vega (per 1.00 vol / 100 vol-pts)" }, "theta": { "type": "number", "description": "Raw BS theta (per year)" }, "rho": { "type": "number" }, "iv_in": { "type": "number", "description": "The IV used as input" }, "underlying_price": { "type": "number" }, "ttm_years": { "type": "number", "description": "Time to maturity in years" }, "rfr": { "type": "number", "description": "Risk-free rate used" } } },
+      "OptionChainResult": { "type": "object", "properties": { "ticker": { "type": "string" }, "underlying_price": { "type": "number" }, "quotes": { "type": "array", "items": { "$ref": "#/components/schemas/OptionQuote" } }, "expiries": { "type": "array", "items": { "type": "string", "format": "date" } }, "rfr": { "type": "number", "description": "Risk-free rate used for greeks" }, "greeks": { "type": "array", "items": { "$ref": "#/components/schemas/GreeksRow" }, "description": "One greeks row per quote (same order); present for both live and mock chains" }, "source": { "type": "string", "enum": ["polygon", "mock"] }, "note": { "type": "string" } } }
+    }
+  }
+}

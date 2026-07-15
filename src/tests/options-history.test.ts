@@ -1,0 +1,135 @@
+// src/tests/options-history.test.ts
+// Phase I (options historical chains): real Polygon chain + mock fallback.
+import { registerOptionsHistoryRoutes } from '../server/options-history-routes';
+import { fetchOptionChain } from '../registry/logic/hist';
+import express from 'express';
+import request from 'supertest';
+
+function makeApp(fetchFn: any) {
+  const app = express();
+  app.use(express.json());
+  registerOptionsHistoryRoutes(app, fetchFn);
+  return app;
+}
+
+const polygonSnapshot = (over: any = {}) => ({
+  results: {
+    underlying_asset: { last_price: 190.5 },
+    results: [
+      {
+        details: { expiration_date: '2026-08-21', strike_price: 190, contract_type: 'call', open_interest: 1234 },
+        greeks: { implied_volatility: 0.32, last_price: 5.4, size: 50 },
+        last_quote: { bid: 5.3, ask: 5.5 },
+        last_trade: { price: 5.4, size: 50 },
+      },
+      {
+        details: { expiration_date: '2026-08-21', strike_price: 190, contract_type: 'put', open_interest: 987 },
+        greeks: { implied_volatility: 0.34, last_price: 4.1, size: 30 },
+        last_quote: { bid: 4.0, ask: 4.2 },
+        last_trade: { price: 4.1, size: 30 },
+      },
+      {
+        details: { expiration_date: '2026-09-18', strike_price: 195, contract_type: 'call', open_interest: 500 },
+        greeks: { implied_volatility: 0.3, last_price: 3.0 },
+        last_quote: { bid: 2.9, ask: 3.1 },
+      },
+    ],
+    ...over,
+  },
+});
+
+describe('fetchOptionChain (Phase I)', () => {
+  it('maps a Polygon snapshot into OptionQuote[] with source polygon', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() });
+    const r = await fetchOptionChain('aapl', { apiKey: 'demo', fetchFn });
+    expect(r.source).toBe('polygon');
+    expect(r.ticker).toBe('AAPL');
+    expect(r.underlying_price).toBe(190.5);
+    expect(r.quotes.length).toBe(3);
+    expect(r.expiries).toEqual(['2026-08-21', '2026-09-18']);
+    const call = r.quotes.find((q) => q.strike === 190 && q.type === 'C');
+    expect(call?.bid).toBe(5.3);
+    expect(call?.iv).toBe(0.32);
+    expect(call?.open_interest).toBe(1234);
+  });
+
+  it('falls back to deterministic mock when no API key is supplied', async () => {
+    const r = await fetchOptionChain('AAPL');
+    expect(r.source).toBe('mock');
+    expect(r.quotes.length).toBeGreaterThan(0);
+    expect(r.note).toContain('No POLYGON_API_KEY');
+  });
+
+  it('falls back to mock when Polygon returns a non-ok status', async () => {
+    const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
+    const r = await fetchOptionChain('AAPL', { apiKey: 'demo', fetchFn });
+    expect(r.source).toBe('mock');
+  });
+
+  it('falls back to mock when the payload has no results', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ results: { results: [] } }) });
+    const r = await fetchOptionChain('AAPL', { apiKey: 'demo', fetchFn });
+    expect(r.source).toBe('mock');
+  });
+});
+
+describe('GET /options-history route (Phase I)', () => {
+  it('400 when symbol missing', async () => {
+    const app = makeApp(async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() }));
+    const res = await request(app).get('/options-history');
+    expect(res.status).toBe(400);
+  });
+
+  it('200 with live chain from Polygon', async () => {
+    const app = makeApp(async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() }));
+    const res = await request(app).get('/options-history?symbol=AAPL');
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe('polygon');
+    expect(res.body.quotes.length).toBe(3);
+  });
+
+  it('200 with mock fallback when no key configured', async () => {
+    // no fetchFn → reads process.env.POLYGON_API_KEY (unset in test env)
+    const app = express();
+    app.use(express.json());
+    registerOptionsHistoryRoutes(app);
+    const res = await request(app).get('/options-history?symbol=AAPL');
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe('mock');
+  });
+});
+
+describe('GET /options-history greeks (Phase 17)', () => {
+  it('returns a greeks row per quote with valid BS deltas for a live chain', async () => {
+    const app = makeApp(async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() }));
+    const res = await request(app).get('/options-history?symbol=AAPL');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.greeks)).toBe(true);
+    expect(res.body.greeks.length).toBe(res.body.quotes.length);
+    for (const g of res.body.greeks) {
+      // delta bounds: call in [0,1], put in [-1,0]
+      if (g.type === 'C') expect(g.delta).toBeGreaterThanOrEqual(0) && expect(g.delta).toBeLessThanOrEqual(1);
+      else expect(g.delta).toBeGreaterThanOrEqual(-1) && expect(g.delta).toBeLessThanOrEqual(0);
+      expect(Number.isFinite(g.gamma)).toBe(true);
+      expect(Number.isFinite(g.vega)).toBe(true);
+      expect(Number.isFinite(g.theta)).toBe(true);
+      expect(g.iv_in).toBeGreaterThan(0);
+      expect(g.ttm_years).toBeGreaterThan(0);
+    }
+  });
+
+  it('derives greeks for the mock chain too (no provider needed)', async () => {
+    const app = express();
+    app.use(express.json());
+    registerOptionsHistoryRoutes(app);
+    const res = await request(app).get('/options-history?symbol=AAPL');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.greeks)).toBe(true);
+    expect(res.body.greeks.length).toBe(res.body.quotes.length);
+    // ATM call delta should be near 0.5
+    const atmCall = res.body.greeks.find(
+      (g: any) => g.type === 'C' && Math.abs(g.strike - res.body.underlying_price) < 1,
+    );
+    if (atmCall) expect(Math.abs(atmCall.delta - 0.5)).toBeLessThan(0.15);
+  });
+});

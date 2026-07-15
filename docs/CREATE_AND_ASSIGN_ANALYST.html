@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Creating a New Analyst &amp; Assigning It to an Agency</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#121a30; --panel2:#0f1730; --ink:#e8eefc; --muted:#9fb0d0;
+    --line:#2a3a5e; --accent:#6366f1; --accent2:#22d3ee; --good:#34d399; --warn:#fbbf24;
+    --bad:#f87171; --chip:#1c2746;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#16203c 0%,var(--bg) 55%);
+    color:var(--ink);font:16px/1.6 "Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;padding:48px 28px 80px;}
+  header.hero{border:1px solid var(--line);border-radius:18px;padding:30px 32px;
+    background:linear-gradient(135deg,#141d38,#0e1530);box-shadow:0 10px 40px rgba(0,0,0,.35);}
+  h1{margin:0 0 6px;font-size:30px;letter-spacing:.2px}
+  h2{margin:46px 0 12px;font-size:22px;border-left:4px solid var(--accent);padding-left:12px}
+  h3{margin:26px 0 8px;font-size:18px;color:var(--accent2)}
+  p{color:var(--ink)} .muted{color:var(--muted)}
+  .lead{color:var(--muted);font-size:15.5px}
+  .note{background:var(--chip);border:1px solid var(--line);border-left:4px solid var(--warn);
+    border-radius:10px;padding:12px 16px;margin:18px 0;color:#fde9b8}
+  .ok{background:var(--chip);border:1px solid var(--line);border-left:4px solid var(--good);
+    border-radius:10px;padding:12px 16px;margin:18px 0;color:#c9f7e4}
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:14px 0}
+  ol.steps>li{position:relative;padding:14px 16px 14px 58px;margin:12px 0;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px}
+  ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:14px;
+    width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));
+    color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+  ul.tight{margin:8px 0 8px 18px} ul.tight li{margin:4px 0}
+  code{background:#0a1124;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#cfe2ff;font-size:13.5px}
+  .chip{display:inline-block;background:var(--chip);border:1px solid var(--line);border-radius:999px;
+    padding:2px 10px;margin:2px 4px 2px 0;font-size:13px;color:#cfe2ff}
+  table{width:100%;border-collapse:collapse;margin:14px 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);color:var(--accent2);font-weight:600;font-size:14px}
+  tr:last-child td{border-bottom:none}
+  .k{color:var(--accent2);font-weight:600}
+  .center{display:flex;justify-content:center;margin:24px 0}
+  svg{display:block;max-width:100%;height:auto}
+  .fig-cap{text-align:center;color:var(--muted);font-size:13.5px;margin-top:6px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:680px){.grid2{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel)}
+  .foot{margin-top:48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
+  a{color:var(--accent2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>Creating a New Analyst &amp; Assigning It to an Agency</h1>
+    <p class="lead">A practical, illustrated walkthrough of the <strong>Settings</strong> dialog in the
+      Financial Analysis Pipeline. This guide is grounded in the actual UI code
+      (<code>frontend/src/components/SettingsDialog.tsx</code> and the analyst/agency dialogs), so every
+      label, button, and endpoint named here is real.</p>
+    <p class="muted" style="margin-top:10px">Assumption: by &ldquo;assign it to&rdquo; you mean <strong>assign the new
+      analyst to an Agency</strong> (a flow). That is the most common case, and it is covered in full below. The same
+      analyst can also be wired into a flow via the re-org dialog &mdash; see Section&nbsp;5.</p>
+  </header>
+
+  <div class="note">
+    <strong>Two separate actions.</strong> &ldquo;Create the analyst&rdquo; and &ldquo;assign it to an agency&rdquo; are
+    <em>different sub-flows in two different tabs</em>. You create the analyst in the <span class="chip">Analysts</span> tab,
+    then assign it in the <span class="chip">Agencies</span> tab (or the agency re-org dialog). Creating the analyst alone
+    does <strong>not</strong> put it into any flow.
+  </div>
+
+  <!-- ============ BIG PICTURE ============ -->
+  <h2>1. The big picture</h2>
+  <p class="muted">The pipeline is a graph of <strong>analysts</strong> grouped into <strong>agencies</strong>. Each agency is an
+    ordered list of analysts (the &ldquo;wall&rdquo;). A custom analyst you create is just a registry entry until you tick it
+    inside an agency &mdash; only then does it run as part of that agency&rsquo;s analysis.</p>
+
+  <div class="center">
+    <svg viewBox="0 0 820 250" width="820" role="img" aria-label="Analyst to agency relationship diagram">
+      <defs>
+        <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/>
+        </linearGradient>
+        <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#9fb0d0"/>
+        </marker>
+      </defs>
+      <!-- registry -->
+      <rect x="20" y="80" width="170" height="90" rx="12" fill="#121a30" stroke="#2a3a5e"/>
+      <text x="105" y="112" text-anchor="middle" fill="#e8eefc" font-size="15" font-weight="700">Analyst catalog</text>
+      <text x="105" y="134" text-anchor="middle" fill="#9fb0d0" font-size="12.5">(registry of analysts)</text>
+      <!-- agency -->
+      <rect x="630" y="40" width="170" height="170" rx="12" fill="#121a30" stroke="#2a3a5e"/>
+      <text x="715" y="70" text-anchor="middle" fill="#e8eefc" font-size="15" font-weight="700">Agency</text>
+      <text x="715" y="90" text-anchor="middle" fill="#9fb0d0" font-size="12">(a flow)</text>
+      <rect x="650" y="100" width="130" height="22" rx="6" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="715" y="115" text-anchor="middle" fill="#cfe2ff" font-size="11.5">orchestrator</text>
+      <rect x="650" y="128" width="130" height="22" rx="6" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="715" y="143" text-anchor="middle" fill="#cfe2ff" font-size="11.5">data_ingestion</text>
+      <rect x="650" y="156" width="130" height="22" rx="6" fill="#22408a" stroke="#3b82f6"/>
+      <text x="715" y="171" text-anchor="middle" fill="#dbeafe" font-size="11.5">+ my_analyst ✦</text>
+      <rect x="650" y="184" width="130" height="18" rx="6" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="715" y="197" text-anchor="middle" fill="#9fb0d0" font-size="10.5">…more analysts</text>
+      <!-- create path -->
+      <path d="M190,125 C300,125 300,125 470,125" stroke="#6346f1" stroke-width="2.5" fill="none" marker-end="url(#arr)" stroke-dasharray="6 5"/>
+      <text x="330" y="112" text-anchor="middle" fill="#c4b5fd" font-size="12.5">① create (Analysts tab)</text>
+      <!-- assign path -->
+      <path d="M470,150 C560,150 600,150 630,150" stroke="#22d3ee" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+      <text x="540" y="172" text-anchor="middle" fill="#67e8f9" font-size="12.5">② assign (Agencies tab)</text>
+      <!-- legend -->
+      <circle cx="40" cy="225" r="5" fill="#6346f1"/><text x="52" y="229" fill="#9fb0d0" font-size="12">create</text>
+      <circle cx="150" cy="225" r="5" fill="#22d3ee"/><text x="162" y="229" fill="#9fb0d0" font-size="12">assign</text>
+    </svg>
+  </div>
+  <p class="fig-cap">Figure 1 &mdash; A custom analyst (✦) is created in the catalog, then ticked into an agency&rsquo;s ordered flow.</p>
+
+  <!-- ============ CREATE ============ -->
+  <h2>2. Create a new analyst (Analysts tab)</h2>
+  <p class="muted">Open <strong>Settings</strong> (gear icon) &rarr; click the <span class="chip">Analysts</span> tab.
+    Built-in analysts are read-only. The bottom form (<em>&ldquo;New analyst&rdquo;</em>) is where you create your own.</p>
+
+  <ol class="steps">
+    <li><strong>Fill the core fields.</strong> Only <code>Id</code> and <code>Name</code> are required.
+      <ul class="tight">
+        <li><span class="k">Id</span> &mdash; snake_case, unique, e.g. <code>my_credit_analyst</code>. Lowercase + underscores. Disabled once you edit an existing one.</li>
+        <li><span class="k">Name</span> &mdash; display name shown on the wall, e.g. <code>My Credit Analyst</code>.</li>
+        <li><span class="k">Role</span> &mdash; a short one-line summary (optional, cosmetic).</li>
+      </ul>
+    </li>
+    <li><strong>Pick its shape.</strong>
+      <ul class="tight">
+        <li><span class="k">Kind</span> &mdash; <code>orchestrator</code> / <code>ingestion</code> / <code>analyst</code> / <code>gatekeeper</code>.</li>
+        <li><span class="k">Stage</span> &mdash; <code>1 · intake</code>, <code>2 · analysis</code>, or <code>3 · decision</code>. Stage sets where the card sits in the flow order.</li>
+        <li><span class="k">Accent</span> &mdash; card color on the wall.</li>
+        <li><span class="k">Depends on</span> &mdash; comma-separated analyst ids this one waits for, e.g. <code>data_ingestion, fundamental</code>.</li>
+      </ul>
+    </li>
+    <li><strong>Define its data (optional but recommended).</strong>
+      <ul class="tight">
+        <li><em>Input data (dataSources)</em> &mdash; click <code>+ Add input source</code>; each row has <code>id</code>, <code>label</code>, <code>from</code>, <code>fields (csv)</code>, <code>sources (csv)</code>.</li>
+        <li><em>Output data (output)</em> &mdash; <code>Channels</code>, <code>Verdict field</code>, <code>Score field</code>, and the <code>Store output in messages</code> checkbox.</li>
+      </ul>
+    </li>
+    <li><strong>Click <code>Create analyst</code></strong> (bottom-right of the form). The UI POSTs to
+      <code>POST /registry/analyst</code>, reloads the catalog, and the new row appears tagged <span class="chip">custom</span>.
+      It now exists &mdash; but is not yet in any agency.</li>
+  </ol>
+
+  <div class="center">
+    <svg viewBox="0 0 760 196" width="760" role="img" aria-label="Create analyst form flow">
+      <rect x="10" y="20" width="200" height="150" rx="12" fill="#121a30" stroke="#2a3a5e"/>
+      <text x="110" y="44" text-anchor="middle" fill="#c4b5fd" font-size="13" font-weight="700">Analysts tab</text>
+      <rect x="28" y="58" width="164" height="20" rx="5" fill="#0a1124" stroke="#2a3a5e"/>
+      <text x="36" y="72" fill="#9fb0d0" font-size="11">Id   my_credit_analyst</text>
+      <rect x="28" y="84" width="164" height="20" rx="5" fill="#0a1124" stroke="#2a3a5e"/>
+      <text x="36" y="98" fill="#9fb0d0" font-size="11">Name My Credit Analyst</text>
+      <rect x="28" y="110" width="78" height="18" rx="5" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="67" y="123" text-anchor="middle" fill="#cfe2ff" font-size="10">Kind: analyst</text>
+      <rect x="114" y="110" width="78" height="18" rx="5" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="153" y="123" text-anchor="middle" fill="#cfe2ff" font-size="10">Stage: 2</text>
+      <rect x="28" y="138" width="164" height="22" rx="6" fill="#22408a" stroke="#3b82f6"/>
+      <text x="110" y="153" text-anchor="middle" fill="#dbeafe" font-size="11.5">Create analyst ▸</text>
+      <path d="M210,95 C300,95 300,95 370,95" stroke="#6346f1" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+      <rect x="374" y="40" width="210" height="110" rx="12" fill="#121a30" stroke="#2a3a5e"/>
+      <text x="479" y="64" text-anchor="middle" fill="#cfe2ff" font-size="12.5" font-weight="700">POST /registry/analyst</text>
+      <text x="479" y="86" text-anchor="middle" fill="#9fb0d0" font-size="11.5">validates id/name/kind/</text>
+      <text x="479" y="103" text-anchor="middle" fill="#9fb0d0" font-size="11.5">stage/logic; reloads catalog</text>
+      <rect x="394" y="116" width="170" height="22" rx="6" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="479" y="131" text-anchor="middle" fill="#cfe2ff" font-size="11">row appears · [custom]</text>
+      <path d="M584,95 C660,95 660,95 720,95" stroke="#9fb0d0" stroke-width="2" fill="none" marker-end="url(#arr)" stroke-dasharray="5 5"/>
+      <text x="700" y="80" text-anchor="middle" fill="#9fb0d0" font-size="11">exists,</text>
+      <text x="700" y="112" text-anchor="middle" fill="#fbbf24" font-size="11">NOT yet in a flow</text>
+    </svg>
+  </div>
+  <p class="fig-cap">Figure 2 &mdash; Creating the analyst registers it as <code>custom</code>; it is not assigned to any agency yet.</p>
+
+  <div class="note">
+    <strong>Why a custom analyst ships a &ldquo;no-op&rdquo; logic.</strong> The backend requires every analyst definition to carry a
+    <code>logic</code> block. A custom analyst created here is a <em>registry entry</em>, not a live handler, so the form sends
+    <code>logic: { mode: 'declarative', weighting: [] }</code> to satisfy validation. It will only actually run once it is wired
+    into an agency that reaches it in the flow.
+  </div>
+
+  <!-- ============ ASSIGN via Agencies tab ============ -->
+  <h2>3. Assign it to an agency (Agencies tab &mdash; the main way)</h2>
+  <p class="muted">Still in <strong>Settings</strong>, click the <span class="chip">Agencies</span> tab. You can either
+    <strong>create a brand-new agency</strong> that includes your analyst, or <strong>edit an existing one</strong> and tick your
+    analyst on.</p>
+
+  <h3>3a. Add the analyst to an existing agency</h3>
+  <ol class="steps">
+    <li>Click the agency row in the list (e.g. <code>Long-Term Investment</code>). It loads into the <em>&ldquo;Edit agency&rdquo;</em> form.</li>
+    <li>In the <em>Analysts</em> checklist, tick the box next to <code>My Credit Analyst</code> (your new <code>custom</code> analyst). The list is the full catalog, so your new analyst is there.</li>
+    <li>Click <code>Save changes</code>. The UI PUTs the updated membership to <code>PUT /registry/agency/:id</code>, then refreshes the dropdown/wall <strong>immediately</strong> &mdash; no re-run needed.</li>
+  </ol>
+
+  <h3>3b. Create a new agency that includes the analyst</h3>
+  <ol class="steps">
+    <li>With the form empty (click <code>Cancel edit</code> if an agency is loaded), set <code>Id</code> (e.g. <code>credit-desk</code>) and <code>Name</code>.</li>
+    <li>Pick a <code>Horizon</code>: <code>LONG_TERM</code> / <code>MEDIUM_TERM</code> / <code>INTRADAY</code>. This drives the default screen interval (intraday &rarr; 5m, others &rarr; 1d).</li>
+    <li>In the <em>Analysts</em> checklist, tick your new analyst <em>and</em> the others it should run with (at least one analyst is required; start from <code>orchestrator, data_ingestion</code> if unsure).</li>
+    <li>Click <code>Create agency</code> &rarr; <code>POST /registry/agency</code>. It appears in the list and the agency selector dropdown right away.</li>
+  </ol>
+
+  <div class="center">
+    <svg viewBox="0 0 780 220" width="780" role="img" aria-label="Assign via Agencies tab">
+      <rect x="14" y="22" width="220" height="176" rx="12" fill="#121a30" stroke="#2a3a5e"/>
+      <text x="124" y="46" text-anchor="middle" fill="#67e8f9" font-size="13" font-weight="700">Agencies tab</text>
+      <rect x="32" y="58" width="184" height="18" rx="5" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="124" y="71" text-anchor="middle" fill="#cfe2ff" font-size="10.5">☐ orchestrator</text>
+      <rect x="32" y="80" width="184" height="18" rx="5" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="124" y="93" text-anchor="middle" fill="#cfe2ff" font-size="10.5">☐ data_ingestion</text>
+      <rect x="32" y="102" width="184" height="18" rx="5" fill="#22408a" stroke="#3b82f6"/>
+      <text x="124" y="115" text-anchor="middle" fill="#dbeafe" font-size="10.5">☑ my_credit_analyst ✦</text>
+      <rect x="32" y="124" width="184" height="18" rx="5" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="124" y="137" text-anchor="middle" fill="#cfe2ff" font-size="10.5">☐ fundamental</text>
+      <rect x="32" y="150" width="184" height="22" rx="6" fill="#22408a" stroke="#3b82f6"/>
+      <text x="124" y="165" text-anchor="middle" fill="#dbeafe" font-size="11">Save changes ▸</text>
+      <path d="M234,110 C310,110 310,110 372,110" stroke="#22d3ee" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+      <rect x="376" y="58" width="200" height="104" rx="12" fill="#121a30" stroke="#2a3a5e"/>
+      <text x="476" y="82" text-anchor="middle" fill="#cfe2ff" font-size="12.5" font-weight="700">PUT /registry/agency/:id</text>
+      <text x="476" y="104" text-anchor="middle" fill="#9fb0d0" font-size="11.5">writes new analyst list</text>
+      <text x="476" y="122" text-anchor="middle" fill="#9fb0d0" font-size="11.5">for that agency</text>
+      <rect x="396" y="134" width="160" height="20" rx="6" fill="#1c2746" stroke="#2a3a5e"/>
+      <text x="476" y="148" text-anchor="middle" fill="#cfe2ff" font-size="10.5">dropdown + wall update live</text>
+      <path d="M576,110 C650,110 650,110 706,110" stroke="#34d399" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+      <rect x="700" y="70" width="64" height="80" rx="10" fill="#121a30" stroke="#2a3a5e"/>
+      <text x="732" y="104" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">runs in</text>
+      <text x="732" y="122" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">flow ✓</text>
+    </svg>
+  </div>
+  <p class="fig-cap">Figure 3 &mdash; Ticking the analyst in the Agencies tab and saving wires it into the agency&rsquo;s flow.</p>
+
+  <!-- ============ re-org ============ -->
+  <h2>4. Alternative: the agency re-org dialog</h2>
+  <p class="muted">From the main UI (not Settings), the agency selector has a <strong>[re-org]</strong> button
+    (<code>AgencySettingsDialog</code> &rarr; <code>AgencyReorgDialog</code>). This lets you <strong>add, remove, and re-order</strong>
+    analysts in an agency&rsquo;s flow and set <em>&ldquo;feeds into&rdquo;</em> wiring (which later analysts depend on the re-orged one).
+    It saves via <code>PUT /registry/agency/:id</code> and re-renders the wall live.</p>
+  <div class="ok">
+    Use re-org when you care about <strong>order and dependencies</strong> (e.g. place your analyst between intake and decision,
+    and wire <code>feeds into: risk</code>). Use the Agencies tab when you just want to toggle membership. Both hit the same
+    backend endpoint; they are two front doors to the same data.
+  </div>
+
+  <!-- ============ verify ============ -->
+  <h2>5. Verify it worked (no re-run needed)</h2>
+  <ul class="tight">
+    <li>In <strong>Settings &rarr; Agencies</strong>, the agency&rsquo;s row now shows one more analyst in its <code>N analysts</code> count.</li>
+    <li>The main <strong>agency selector dropdown</strong> lists the agency (if new) immediately.</li>
+    <li>Selecting that agency renders the <strong>analyst wall</strong> with your custom card (in its stage / accent color) &mdash; this happens live via <code>applyRegistryAgencies()</code>; you do <em>not</em> have to wait for a &ldquo;next run.&rdquo;</li>
+    <li>To actually <em>execute</em> it, run an analysis for that agency. The custom analyst only performs work if the flow reaches it; with the no-op <code>declarative</code> logic it acts as a registry placeholder unless you later give it real behavior.</li>
+  </ul>
+
+  <!-- ============ field reference ============ -->
+  <h2>6. Quick field reference</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Where</th><th>Required?</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Id</td><td>Analysts form</td><td>Yes</td><td>snake_case, unique, e.g. <code>my_credit_analyst</code></td></tr>
+      <tr><td class="k">Name</td><td>Analysts form</td><td>Yes</td><td>Display name on the wall</td></tr>
+      <tr><td class="k">Role</td><td>Analysts form</td><td>No</td><td>Short summary line</td></tr>
+      <tr><td class="k">Kind</td><td>Analysts form</td><td>Has default</td><td>orchestrator / ingestion / analyst / gatekeeper</td></tr>
+      <tr><td class="k">Stage</td><td>Analysts form</td><td>Has default</td><td>1 intake · 2 analysis · 3 decision</td></tr>
+      <tr><td class="k">Depends on</td><td>Analysts form</td><td>No</td><td>comma-separated ids the analyst waits for</td></tr>
+      <tr><td class="k">dataSources / output</td><td>Analysts form</td><td>No</td><td>Input fields + output channels/verdict/score</td></tr>
+      <tr><td class="k">Horizon</td><td>Agencies form</td><td>Has default</td><td>LONG_TERM / MEDIUM_TERM / INTRADAY (drives screen interval)</td></tr>
+      <tr><td class="k">Analysts (checklist)</td><td>Agencies form</td><td>Yes (≥1)</td><td>Tick your custom analyst here to assign it</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ pitfalls ============ -->
+  <h2>7. Common pitfalls</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">Analyst created but never runs</h3>
+      <p class="muted" style="font-size:14px">You created it but didn&rsquo;t tick it in any agency (Section 3) or re-org (Section 4). A catalog entry alone is not a flow member.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Save button disabled</h3>
+      <p class="muted" style="font-size:14px">Agency save needs ≥1 analyst ticked and a non-empty Id. Analyst save needs both Id and Name.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Built-in analyst greyed out</h3>
+      <p class="muted" style="font-size:14px">Built-ins can&rsquo;t be edited or deleted &mdash; only your <code>custom</code> ones can. Click a custom row to load it for edit.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Default agency can&rsquo;t be deleted</h3>
+      <p class="muted" style="font-size:14px">The <code>long-term</code> default agency&rsquo;s Delete is disabled by design. Create a new agency instead.</p>
+    </div>
+  </div>
+
+  <div class="foot">
+    Generated from the live UI code in <code>frontend/src/components/SettingsDialog.tsx</code>,
+    <code>AnalystSettingsDialog.tsx</code>, <code>analysts/AgencyReorgDialog.tsx</code>, and
+    <code>analysts/agencies.ts</code>. Endpoints: <code>POST/PUT/DELETE /registry/analyst</code> and
+    <code>POST/PUT/DELETE /registry/agency</code>. Open this file in any browser &mdash; no external assets required.
+  </div>
+
+</div>
+</body>
+</html>

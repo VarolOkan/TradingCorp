@@ -1,0 +1,484 @@
+// frontend/src/components/AnalysisView.tsx
+import type { Socket } from 'socket.io-client';
+import { useEffect, useState } from 'react';
+import { useAnalysis } from '../hooks/useAnalysis';
+import AnalysisForm from './AnalysisForm';
+import ResultsPanel from './ResultsPanel';
+import RelationsGraphView from './RelationsGraphView';
+import AnalystWall from './analysts/AnalystWall';
+import AnalystTraceDrawer from './analysts/AnalystTraceDrawer';
+import AnalystSettingsDialog from './AnalystSettingsDialog';
+import MarketDataCard from './MarketDataCard';
+import CompareView from './compare/CompareView';
+import ScreenerPanel from './ScreenerPanel';
+import WatchlistBar from './WatchlistBar';
+import { useAnalystRun } from '../hooks/useAnalystRun';
+import type { AnalystId, AnalystSourceCatalog } from '../types';
+import { agencyById, DEFAULT_AGENCY, type AgencyId } from './analysts/agencies';
+import { analystById, type AnalystMeta } from './analysts/analysts';
+import { AgencySelect } from './analysts/AgencySelect';
+import AgencySettingsDialog from './analysts/AgencySettingsDialog';
+import { buildAnalystConfigSchema, type AnalystConfigSchema } from './analysts/analystConfigSchema';
+import { getAnalystFlavors, type GetAnalystFlavorsResponse } from '../api/analystFlavorsClient';
+
+export interface AnalysisViewProps {
+  socket: Socket | null;
+  connected: boolean;
+  sessionId?: string;
+  onSessionChange?: (id: string) => void;
+  /** B1: catalog of analysts that declare a LIVE+auth source (drives ⚙ button). */
+  sourceCatalog?: AnalystSourceCatalog;
+  /** B1: sources already configured (shows ✓ instead of ⚙). */
+  configuredSourceKeys?: Set<string>;
+  /**
+   * §12.4.1: the selected agency, lifted to the parent so the top-right Settings
+   * dialog's per-agency "default model" control targets the SAME agency the user
+   * is viewing. When omitted, the view falls back to its own internal state.
+   */
+  agencyId?: AgencyId;
+  onAgencyChange?: (id: AgencyId) => void;
+  /** Bumped by the parent (App) after an agency create/delete so the dropdown
+   *  re-renders from the mutated AGENCIES mirror. Combined with the view's own
+   *  re-org version bump. */
+  registryVersion?: number;
+}
+
+export function AnalysisView({
+  socket,
+  connected,
+  sessionId = 'default',
+  onSessionChange,
+  sourceCatalog = { analysts: [] },
+  configuredSourceKeys = new Set<string>(),
+  agencyId: agencyIdProp,
+  onAgencyChange,
+  registryVersion: registryVersionProp = 0,
+}: AnalysisViewProps) {
+  // Configured-source tracking lives here now: the gear (owned here) sets the
+  // dialog's state here too, so clicking the gear actually opens the token
+  // dialog instead of a dead copy.
+  const [configuredSourceKeysInternal, setConfiguredSourceKeysInternal] = useState<Set<string>>(configuredSourceKeys);
+  const { running, result, error, submit, analystTraces, reset: resetAnalysis } = useAnalysis(socket);
+  // Analyst wall is driven by the REAL per-analyst events streamed from the
+  // backend for the most recent submission's tickers.
+  const [wallTickers, setWallTickers] = useState<string[]>([]);
+  // Which agency (node composition) is selected. Drives the wall's analyst set
+  // so agencies with a different node count (e.g. the 4-node crypto-screener)
+  // render their own panels instead of the hardcoded 7-analyst layout.
+  // Controlled when the parent passes agencyId (§12.4.1), else internal.
+  const [agencyIdInternal, setAgencyIdInternal] = useState<AgencyId>(DEFAULT_AGENCY);
+  const agencyId = agencyIdProp ?? agencyIdInternal;
+  // Bumped after a re-org or agency CRUD save so the wall + dropdown re-render
+  // immediately from the mutated AGENCIES mirror (no "next run" deferral).
+  const [registryVersion, setRegistryVersion] = useState(0);
+  // Symbol text for the "Ticker symbols" input. Lifted here so the Screener's
+  // "→ Analyze" (and other surfaces) can drop a ticker into the field without
+  // auto-submitting — the user reviews/edits it, then hits Analyze themselves.
+  const [symbolInput, setSymbolInput] = useState('');
+  // Screener expand/collapse state, lifted so "→ Analyze" can collapse the
+  // panel (after filling the input + starting the run).
+  const [screenerOpen, setScreenerOpen] = useState(false);
+  // "Agencies Analysts" collapsible wrapper around the Analyst Wall cards.
+  // Default expanded per request.
+  const [analystsOpen, setAnalystsOpen] = useState(true);
+  // Collapsible wrappers for the Results and Relations sections (default open).
+  const [resultsOpen, setResultsOpen] = useState(true);
+  const [relationsOpen, setRelationsOpen] = useState(true);
+  // Top collapsible grouping the Watchlist + Ticker symbols + Stock Screener.
+  const [topSectionOpen, setTopSectionOpen] = useState(true);
+  // Agency switching is guarded by requestAgency/commitAgency (defined below
+  // handleSubmit, once resetWall + resetAnalysis are in scope).
+  const agencyAnalysts: AnalystMeta[] = agencyById(agencyId).analysts
+    .map((id) => analystById(id as AnalystId))
+    .filter(Boolean);
+  const { state: wall, reset: resetWall } = useAnalystRun(socket, wallTickers, { analystIds: agencyAnalysts.map((a) => a.id) });
+  // Phase F: load each analyst's shipped flavor set for the current agency so
+  // the Settings dialog can offer a flavor dropdown. Non-fatal if it fails.
+  // NOTE: depend only on agencyId + sessionId — `agencyAnalysts` is a fresh
+  // array every render and would otherwise retrigger this effect in a loop.
+  useEffect(() => {
+    let cancelled = false;
+    const ids = agencyById(agencyId).analysts;
+    Promise.all(
+      ids.map(async (id) => {
+        try {
+          const data = await getAnalystFlavors(sessionId, agencyId, id as string);
+          return { id: id as string, data };
+        } catch {
+          return { id: id as string, data: undefined };
+        }
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const map: Record<string, GetAnalystFlavorsResponse> = {};
+      for (const r of results) if (r.data) map[r.id] = r.data;
+      setLiveFlavorsById(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agencyId, sessionId, registryVersion, registryVersionProp]);
+  // Which analyst's drill-down drawer is open (null = closed).
+  const [openAnalyst, setOpenAnalyst] = useState<AnalystId | null>(null);
+  // §Card-settings: which analyst's Settings panel is open (null = closed).
+  const [settingsAnalyst, setSettingsAnalyst] = useState<AnalystId | null>(null);
+  // Per-agency settings dialog (moved out of the top-right Settings dialog):
+  // open when true, targets the currently selected agency.
+  const [agencySettingsOpen, setAgencySettingsOpen] = useState(false);
+  // §Card-settings: analysts the user has saved config for (shows ✓ on gear).
+  const [configuredAnalystIds, setConfiguredAnalystIds] = useState<Set<string>>(new Set());
+  // Phase 5: compare mode toggle — enabled when 2-5 tickers are in the current
+  // run so the user can switch the market-row into a relative-performance view.
+  const [compareMode, setCompareMode] = useState(false);
+  // Phase F: shipped flavor sets per analyst id (for the current agency), keyed by analyst id.
+  // Now stores the FULL GetAnalystFlavorsResponse (incl. instructions + selectedId) so the
+  // trace drawer can show the LIVE (just-edited) Role & Instructions immediately after a save,
+  // without requiring a re-run. (Previously it only kept {id,name,role}, so edits were invisible
+  // until the next analysis.)
+  const [liveFlavorsById, setLiveFlavorsById] = useState<Record<string, GetAnalystFlavorsResponse>>({});
+  // Whether the currently-displayed result has been saved/exported. Resets on
+  // every new run; gates the "unsaved results" confirm-before-switch prompt.
+  const [saved, setSaved] = useState(false);
+  // Target agency while a switch is blocked by unsaved data (null = no prompt).
+  const [pendingAgency, setPendingAgency] = useState<AgencyId | null>(null);
+  // Reload a single analyst's flavor set (called after a save) so the wall + drawer reflect edits.
+  const reloadFlavors = async (analystId: string) => {
+    try {
+      const data = await getAnalystFlavors(sessionId, agencyId, analystId);
+      setLiveFlavorsById((prev) => ({ ...prev, [analystId]: data }));
+    } catch {
+      /* non-fatal */
+    }
+  };
+
+  // Build the per-card Settings schema for the CURRENT agency from the source
+  // catalog (drives which cards show a gear + what the dialog renders).
+  const settingsSchemas: Record<string, AnalystConfigSchema> = {};
+  for (const meta of agencyAnalysts) {
+    const cat = sourceCatalog.analysts.find((c) => c.analystId === meta.id);
+    const schema = buildAnalystConfigSchema(
+      meta.id,
+      meta.name,
+      cat ? cat.sources : [],
+    );
+    // Phase F: attach the analyst's shipped flavor set (drives the Flavors
+    // section + gear in the Settings dialog). Fetched once per agency change.
+    const fl = liveFlavorsById[meta.id];
+    schema.flavors = fl
+      ? fl.flavors.map((f) => ({ id: f.id, name: f.name, role: f.role }))
+      : [];
+    // A card with flavors or weights is user-configurable, so the settings gear
+    // must show even when the analyst has no credentialed source (e.g. the
+    // options analysts ship flavors but no weights). Note: a credentialed
+    // SOURCE alone does NOT make the settings gear appear — sources are owned
+    // by the separate source-config gear, and we must not open the settings
+    // dialog to a duplicate/empty source section.
+    schema.hasConfig = schema.weights.length + schema.flavors.length > 0;
+    settingsSchemas[meta.id] = schema;
+  }
+  const handleSubmit = (tickers: string[]) => {
+    setWallTickers(tickers);
+    setOpenAnalyst(null);
+    setSaved(false);
+    setPendingAgency(null);
+    setCompareMode(false);
+    submit(tickers, sessionId, agencyId);
+  };
+
+  // Confirm-before-switch guard: if a completed result exists and hasn't been
+  // saved/exported yet, ask before wiping the displayed cards + results.
+  const commitAgency = (id: AgencyId) => {
+    setAgencyIdInternal(id);
+    onAgencyChange?.(id);
+    resetWall();
+    setWallTickers([]);
+    resetAnalysis();
+    setOpenAnalyst(null);
+    setPendingAgency(null);
+    setSaved(false);
+  };
+  const requestAgency = (id: AgencyId) => {
+    if (id === agencyId) return;
+    if (result && !saved) {
+      setPendingAgency(id);
+      return;
+    }
+    commitAgency(id);
+  };
+
+  const traceAvailable = (id: AnalystId) =>
+    analystTraces.some((t) => t.analyst === id);
+
+  // §4.9 analysts whose trace is degraded (ran on a reduced source set).
+  const degradedIds = new Set<AnalystId>(
+    analystTraces.filter((t) => t.degraded).map((t) => t.analyst),
+  );
+
+  return (
+    <div className="analysis-view">
+      {/* The agency (node composition) is the user's FIRST decision, so the
+          selector sits above the ticker input. Selecting an agency immediately
+          drives the analyst cards shown below (see agencyAnalysts + AnalystWall).
+          The ⚙ button opens the per-agency settings dialog (default model). */}
+      <div className="agency-row">
+        <AgencySelect value={agencyId} onChange={requestAgency} disabled={running} />
+        <button
+          type="button"
+          className="agency-settings-gear"
+          aria-label={`${agencyById(agencyId).name} settings`}
+          title="Agency settings"
+          onClick={() => setAgencySettingsOpen(true)}
+        >
+          ⚙
+        </button>
+      </div>
+
+      {/* Phase 7: persistent Watchlist / Portfolio — the user's "my tickers"
+          home. Lands above the form so returning users see their saved
+          symbols first; clicking a chip deep-dives via the analysis tool. */}
+
+      {/* Top collapsible: Watchlist + Ticker symbols + Stock Screener, grouped
+          for a compact default view. Frame + header stay visible when collapsed
+          (only the inner content animates). Sits just below the agency selector
+          so the agency remains the first analysis control. */}
+      <div className="top-section" data-testid="top-section">
+        <button
+          type="button"
+          className="collapsible-section-toggle"
+          aria-expanded={topSectionOpen}
+          data-testid="top-section-toggle"
+          onClick={() => setTopSectionOpen((v) => !v)}
+        >
+          {topSectionOpen ? '▾' : '▸'} Watchlist &amp; Screeners
+        </button>
+        <div className="collapsible" aria-expanded={topSectionOpen}>
+          <div className="collapsible-inner">
+            <WatchlistBar
+              // Clicking a watchlist chip drops the ticker into the Ticker symbols
+              // input box ONLY — it does NOT auto-run. The user reviews/edits the
+              // symbol and then clicks [Analyze] themselves. (Per request: fill the
+              // field, don't trigger the analysis.)
+              onOpen={(s) => { setSymbolInput(s); }}
+              onAnalyze={(s) => { setSymbolInput(s); }}
+            />
+
+            <AnalysisForm
+              onSubmit={handleSubmit}
+              running={running}
+              sessionId={sessionId}
+              onSessionChange={onSessionChange}
+              value={symbolInput}
+              onChange={setSymbolInput}
+            />
+
+            {/* Phase 6: Stock Screener — find the most promising tickers for the
+                selected agency. "→ Analyze" drops the ticker into the Ticker symbols
+                field above, kicks off the analysis run, AND collapses the panel. */}
+            <ScreenerPanel
+              agencyId={agencyId}
+              open={screenerOpen}
+              onOpenChange={setScreenerOpen}
+              onPick={(t) => { setScreenerOpen(false); handleSubmit([t]); setSymbolInput(t); }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Phase M: after a symbol is submitted, show a SINGLE unified market card
+          (Chart / Quote / History / Options tabs) instead of three separate
+          panels. */}
+      {wallTickers.length > 0 && (
+        <div className="market-row-wrap">
+          {wallTickers.length >= 2 && wallTickers.length <= 5 && (
+            <div className="compare-toggle-row" data-testid="compare-toggle-row">
+              <button
+                type="button"
+                className={`compare-toggle ${compareMode ? 'active' : ''}`}
+                aria-pressed={compareMode}
+                data-testid="compare-toggle"
+                onClick={() => setCompareMode((v) => !v)}
+              >
+                {compareMode ? 'Exit compare' : 'Compare tickers'}
+              </button>
+              <span className="compare-hint">Comparing {wallTickers.length} tickers</span>
+            </div>
+          )}
+          {compareMode ? (
+            <CompareView tickers={wallTickers} result={result} />
+          ) : (
+            <div className="market-row" data-testid="market-row">
+              {wallTickers.map((t) => (
+                <MarketDataCard
+                  key={t}
+                  symbol={t}
+                  agencyId={agencyId}
+                  technical={result?.technical_analysis?.[t] ?? null}
+                  sentiment={result?.sentiment_analysis?.[t] ?? null}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!connected && (
+        <p className="connect-hint" role="status">
+          Connect to the analysis server to run an analysis.
+        </p>
+      )}
+
+      {running && (
+        <p className="analyzing" role="status">
+          Analyzing… (streaming agent output)
+        </p>
+      )}
+
+      {error && (
+        <p className="analysis-error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {/* The wall reflects the SELECTED agency's analyst set. It is shown as
+          soon as an agency is chosen (always, since there is a default), so the
+          user sees the right cards before they even type a ticker. Running an
+          analysis then lights these same panels as the agents execute.
+          Wrapped in a collapsible "[Agencies Analysts]" section (default open).
+          The frame + header live OUTSIDE .collapsible so the section stays
+          visible when collapsed (only the inner content animates). */}
+      <div className="agencies-analysts" data-testid="agencies-analysts">
+        <button
+          type="button"
+          className="agencies-analysts-toggle"
+          aria-expanded={analystsOpen}
+          data-testid="agencies-analysts-toggle"
+          onClick={() => setAnalystsOpen((v) => !v)}
+        >
+          {analystsOpen ? '▾' : '▸'} Agencies Analysts
+        </button>
+        <div className="collapsible" aria-expanded={analystsOpen}>
+          <div className="collapsible-inner">
+            <AnalystWall
+              run={wall}
+              traceAvailable={traceAvailable}
+              onOpen={setOpenAnalyst}
+              degradedIds={degradedIds}
+              sourceConfiguredAnalysts={sourceCatalog.analysts}
+              onConfigure={setSettingsAnalyst}
+              configuredSourceKeys={configuredSourceKeys}
+              settingsSchemas={settingsSchemas}
+              configuredAnalystIds={configuredAnalystIds}
+              analysts={agencyAnalysts}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="results-section" data-testid="results-section">
+        <button
+          type="button"
+          className="collapsible-section-toggle"
+          aria-expanded={resultsOpen}
+          data-testid="results-section-toggle"
+          onClick={() => setResultsOpen((v) => !v)}
+        >
+          {resultsOpen ? '▾' : '▸'} Results
+        </button>
+        <div className="collapsible" aria-expanded={resultsOpen}>
+          <div className="collapsible-inner">
+            <ResultsPanel result={result} onResultSaved={() => setSaved(true)} />
+          </div>
+        </div>
+      </div>
+
+      {result && (
+        <div className="relations-section" data-testid="relations-section">
+          <button
+            type="button"
+            className="collapsible-section-toggle"
+            aria-expanded={relationsOpen}
+            data-testid="relations-section-toggle"
+            onClick={() => setRelationsOpen((v) => !v)}
+          >
+            {relationsOpen ? '▾' : '▸'} Relations
+          </button>
+          <div className="collapsible" aria-expanded={relationsOpen}>
+            <div className="collapsible-inner">
+              <RelationsGraphView result={result} width={600} height={360} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AnalystTraceDrawer
+        traces={analystTraces}
+        analystId={openAnalyst}
+        onClose={() => setOpenAnalyst(null)}
+        onSelect={setOpenAnalyst}
+        liveFlavorsById={liveFlavorsById}
+        onFlavorSaved={reloadFlavors}
+      />
+
+      <AnalystSettingsDialog
+        open={settingsAnalyst !== null}
+        onClose={() => setSettingsAnalyst(null)}
+        analystId={settingsAnalyst ?? ''}
+        analystName={settingsAnalyst ? analystById(settingsAnalyst as AnalystId).name : ''}
+        agencyId={agencyId}
+        schema={settingsAnalyst ? settingsSchemas[settingsAnalyst]! : ({} as AnalystConfigSchema)}
+        sessionId={sessionId}
+        onSaved={(id) =>
+          setConfiguredAnalystIds((prev) => new Set(prev).add(id))
+        }
+        onFlavorSaved={reloadFlavors}
+      />
+
+      <AgencySettingsDialog
+        open={agencySettingsOpen}
+        onClose={() => setAgencySettingsOpen(false)}
+        agencyId={agencyId}
+        agencyName={agencyById(agencyId).name}
+        sessionId={sessionId}
+        onRegistryChange={() => setRegistryVersion((v) => v + 1)}
+      />
+
+      {pendingAgency && (
+        <div
+          className="agency-switch-confirm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Unsaved results — confirm agency switch"
+          data-testid="agency-switch-confirm"
+        >
+          <div className="agency-switch-confirm-box">
+            <p className="agency-switch-confirm-msg">
+              You have unsaved analysis results for the current agency. Switching to{' '}
+              <strong>{agencyById(pendingAgency).name}</strong> will clear the displayed data.
+              Switch anyway?
+            </p>
+            <div className="agency-switch-confirm-actions">
+              <button
+                type="button"
+                className="btn-primary"
+                data-testid="agency-switch-confirm-yes"
+                onClick={() => commitAgency(pendingAgency)}
+              >
+                Switch &amp; clear
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                data-testid="agency-switch-confirm-no"
+                onClick={() => setPendingAgency(null)}
+              >
+                Keep current
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default AnalysisView;
