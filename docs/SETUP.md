@@ -11,7 +11,7 @@
 ## Install
 
 ```bash
-cd financial-analysis-pipeline
+cd TradingCorp
 npm install
 ```
 

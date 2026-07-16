@@ -2,7 +2,7 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
-// Vite config for the financial-analysis-pipeline React SPA.
+// Vite config for the TradingCorp React SPA.
 // - Dev server proxies /socket.io and /config to the Express backend.
 //   The backend port is taken from PORT (server side) or VITE_SERVER_PORT
 //   (here) and defaults to 3001. To run on a different port, start BOTH with
@@ -68,6 +68,12 @@ export default defineConfig({
       // and the Settings → Agencies tab fetch the SPA HTML from Vite
       // (returns no JSON) and throw "Unexpected token '<'".
       '/registry': { target: backendTarget, changeOrigin: true },
+      // API docs (Swagger UI at /api-docs + spec at /api-docs/openapi.json).
+      // The "View API docs" button opens the SAME-ORIGIN path /api-docs/ (so it
+      // goes through Vite in dev, which proxies here), instead of the Settings
+      // Backend URI — that URI is often a bare localhost:3001 or a LAN host the
+      // browser can't reach, which produced "This site can't be reached".
+      '/api-docs': { target: backendTarget, changeOrigin: true },
     },
   },
   build: {

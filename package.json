@@ -1,7 +1,7 @@
 {
-  "name": "financial-analysis-pipeline",
+  "name": "tradingcorp",
   "version": "1.0.0",
-  "description": "Multi-agent financial analysis system with preservation-first philosophy",
+  "description": "Multi-agent financial analysis system (TradingCorp) with preservation-first philosophy",
   "main": "src/server/index.ts",
   "scripts": {
     "dev": "vite --config vite.config.ts",

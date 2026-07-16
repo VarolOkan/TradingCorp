@@ -1,4 +1,4 @@
-# Financial Analysis Pipeline
+# TradingCorp
 
 Multi-agent AI system for **preservation-first** investment analysis. A backend
 orchestrates several specialist agents (fundamental, technical, sentiment, risk)
@@ -61,6 +61,20 @@ over Socket.IO, and renders the result in a React single-page app.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full data-flow and
 LangGraph state schema.
 
+## Screenshots
+
+![Options Agency screener](screenshots/DateSelector.jpg)
+*Just a preview — Allows you to switch Agencies ( different workflows ), Create Watchlist, 
+kick off a stock screener based on selected Agency, Company info, such as charts Quotes,
+Options chain, and current news articles. Display of each Analysts work, and the generated Results.
+Store the report for later review.
+
+The UI allows you to fully configure the Agency, Analysts, and LLM models used
+
+the top-N most promising tickers for the selected
+agency, scored against its analyst composition (promise bar + Tech / Sent /
+Mom / Verdict), with a → Analyze hand-off into the analysis tool.*
+
 ---
 
 ## Tech stack
@@ -80,7 +94,7 @@ LangGraph state schema.
 ## Project layout
 
 ```
-financial-analysis-pipeline/
+TradingCorp/
 ├── frontend/                 # React + Vite SPA (new)
 │   ├── index.html
 │   ├── src/
@@ -309,6 +323,50 @@ in-drawer analyst switcher lets you move laterally between analysts without clos
 
 ---
 
+## Stock Screener
+
+The **Stock Screener** sits above the market row and finds the **top-N most
+promising tickers for the currently selected agency**, fast (LLM-free). It is
+driven by `GET /screener?agencyId=&limit=&universe=` and
+`src/registry/logic/screener.ts`.
+
+**How it scores.** Each candidate is scored on **cheap, LLM-free signals
+only** — technical / momentum / volatility derived from price bars
+(`fetchPriceBars`) and news sentiment (`fetchCompanyNews` + `scoreHeadline`).
+The blend is weighted by **which analysts the selected agency actually
+contains** (`resolveAgencyWeights`), so a crypto agency leans on
+sentiment/onchain while a long-term equity agency leans on technical +
+fundamental + sentiment. A bounded-concurrency pool (6 in-flight) keeps it
+quick.
+
+**Real data, honest badge.** The candidate universe is pulled **live** from the
+NasdaqTrader listed-directory (~13k symbols; `UNIVERSE_PROVIDER=sp500` switches
+to a Wikipedia/CSV S&P 500 list). Per-ticker price bars come **live from Yahoo
+(tokenless, delayed ~15–20 min)**, falling back to `mock` bars only when the
+chart endpoint is throttled. The screen result carries a
+**semantically honest badge** — it is *not* a UI bug when it reads `DELAYED`:
+
+| Badge | Meaning | When |
+|-------|---------|------|
+| `LIVE`  | Real universe + every row on live bars | Reserved for a future sub-second feed |
+| `DELAYED` | Real universe; some rows on mock bars | **Normal case.** Shows `N/M live` sub-count |
+| `MOCK` | Universe fell back **and** zero live rows | Only when no live source is reachable at all |
+
+A **Data lineage** block under the table shows the universe pipeline
+(listed → parsed → pre-filtered → final pool, with source + `LIVE`/`CACHE`/`FALLBACK`
+origin badge) and warns **only** when the universe genuinely fell back. The
+**Promise** column is a stacked bar / number / top-axis label; the **Run**
+button shows a **live running timer** during the 30–40s screen; and a **field
+legend** explains every column (Promise / Tech / Sent / Mom / Verdict). Click
+any column header to sort. Each row has a **→ Analyze** button that sends the
+ticker straight into the analysis tool.
+
+See [`docs/openapi.json`](docs/openapi.json) (`GET /screener`) for the full
+response schema, and the Phase 18 row in the phased plan above for the
+root-cause fixes (Yahoo 429 retry + circuit-breaker, Nasdaq parser guards).
+
+---
+
 ## Auto-connect with retry
 
 On load the app attempts to connect to the Socket.IO backend automatically — this
@@ -348,6 +406,9 @@ before the next begins.
 | **15** | **Stock Screener (item 6)** — `GET /screener?agencyId=&limit=&universe=` returns the **top-N most-promising tickers for the currently selected agency**, fast. `src/registry/logic/screener.ts` scores a candidate universe against the **agency's actual analyst composition** (derived axis weights from `agencies.ts`) using only **cheap, LLM-free signals**: `fetchPriceBars` (technical / momentum / volatility) + `fetchCompanyNews` / `scoreHeadline` (sentiment). A **bounded-concurrency pool (6 in-flight)** keeps it quick; the response includes `elapsedMs` + per-axis scores + a `topAxis` tag so the UI can label *why* each ticker ranked. Frontend `ScreenerPanel` sits above the market-row with a **Run** button, a top-N table (promise bar + tech / sentiment / momentum / verdict), an **elapsed-time readout**, and a **→ Analyze** button that sends the pick straight into the analysis tool. | ✅ Done |
 | **16** | **Watchlist / Portfolio layer (item 7)** — the persistent "my tickers" home. `src/lib/watchlist.ts` is an SSR-safe `localStorage` store with a reactive `useWatchlist()` hook (module-level pub/sub keeps every consumer in sync). `WatchlistBar` renders above the form so returning users land on a **portfolio view** (saved-symbol chips + add input), not a one-shot form; clicking a chip **deep-dives** through the analysis tool (`MarketDataCard`), and a × removes it. `MarketDataCard` gained a **watch star** (controlled `watched`/`onToggleWatch` props, falling back to the shared store when uncontrolled) so starring a market card promotes it into the watchlist — closing the loop between one-shot research and a saved portfolio. | ✅ Done |
 | **17** | **Options Greeks in the Options tab** — each option quote now carries **Black–Scholes greeks (Δ/Γ/ν/Θ/ρ)** re-derived from its implied volatility (`bsGreeks` in `src/registry/logic/greeks.ts`, already the project's single pricing source of truth). `GET /options-history` now returns a `greeks[]` array (one row per quote, computed for both the live Polygon chain and the mock fallback — so Greeks show even with no key/network). `MarketDataCard`'s Options tab renders a **separate per-strike Greeks subtable** (Call/Put side, Δ/Γ/ν/Θ/ρ) below the Call/Put table; vega is shown per 1 vol-point (ν/100) and theta per day (Θ/365), with a footnote explaining the scaling. No new data provider required. | ✅ Done |
+| **18** | **Real-data Stock Screener (truthful badge + UI)** — the screener now sources a **LIVE tradable universe** (NasdaqTrader listed directory, ~13k symbols; `UNIVERSE_PROVIDER=sp500` switches to a Wikipedia/CSV S&P 500 list) instead of a hardcoded 25-ticker list. Per-ticker price bars are pulled **live (Yahoo, tokenless, delayed ~15–20 min)** with a `mock` fallback only when the chart endpoint is throttled. The result carries a **semantically honest data-source badge**: `LIVE` (real universe + all live bars), `DELAYED` (real universe, some rows on mock bars — shows an `N/M live` sub-count), or `MOCK` (universe fell back AND zero live rows). A **Data lineage** block shows the universe pipeline (listed → parsed → pre-filtered → final pool, source + origin badge) and warns only when it genuinely fell back. The Promise column renders a **stacked bar / number / top-axis label**, the Run button shows a **live running timer** (e.g. `Screening… 12.3s`) during the 30–40s screen, and a **field legend** explains each column. Backend root-causes fixed: listed-reference crash, Nasdaq parser guards, Yahoo 429 retry + circuit-breaker after 2 empty batches, Wikipedia retry, live-unpriced fallback pool. 18 new backend universe tests + 12 frontend `ScreenerPanel` tests. | ✅ Done |
+| **19** | **API docs served same-origin + dynamic server host** — `GET /api-docs` (Swagger UI v5, dark mode) is served by the Express backend at runtime from `docs/openapi.json`; **not** generated at build time. The "View API docs" button now opens the **SPA's own origin** `/api-docs/` (proxied by Vite in dev, same origin in prod) instead of the Settings **Backend URI** (which pointed at `localhost:3001` and was unreachable on a LAN host). The served spec's `servers` entry is **rewritten from `HOST`/`PORT` env at request time** (falls back to `localhost:3001` when unset), so Swagger UI's "Servers" line matches how the server was actually started (e.g. `http://10.9.200.188:8091`). 3 new backend `api-docs-routes.test.ts` cases. | ✅ Done |
+| **20** | **Rebrand to TradingCorp** — every user-visible "Financial Analysis Pipeline" string is renamed to **TradingCorp** (app header `<h1>`, browser tab title, Swagger UI title, Socket.IO "Connected to…" message, OpenAPI `title`/`description`/`contact`, report PDF/HTML footers, both README headings, analyst-guide HTML, docs dir references). Package identity (`package.json` + `package-lock.json` `name`) → `tradingcorp`; the news fetch User-Agent and the Vite config comment updated to match. The internal LLM-vault crypto salt is intentionally **left unchanged** (renaming it would break decryption of saved credentials). | ✅ Done |
 
 ---
 

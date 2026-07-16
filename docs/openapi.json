@@ -1,10 +1,10 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Financial Analysis Pipeline — REST API",
+    "title": "TradingCorp — REST API",
     "version": "1.0.0",
-    "description": "REST surface of the Financial Analysis Pipeline analysis server (Express + Socket.IO on :3001). Covers connection config, LLM provider config, per-analyst source credentials / weights / flavors, market data (quote, history, options history, company news + sentiment), the Stock Screener, the multi-agent registry (agencies + analysts CRUD), and report persistence. Realtime analysis streaming itself is delivered over Socket.IO (out of scope for this REST doc).",
-    "contact": { "name": "Financial Analysis Pipeline" }
+    "description": "REST surface of the TradingCorp analysis server (Express + Socket.IO on :3001). Covers connection config, LLM provider config, per-analyst source credentials / weights / flavors, market data (quote, history, options history, company news + sentiment), the Stock Screener, the multi-agent registry (agencies + analysts CRUD), and report persistence. Realtime analysis streaming itself is delivered over Socket.IO (out of scope for this REST doc).",
+    "contact": { "name": "TradingCorp" }
   },
   "servers": [
     { "url": "http://localhost:3001", "description": "Local dev server" }

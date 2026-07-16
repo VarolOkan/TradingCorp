@@ -829,8 +829,14 @@ export function SettingsDialog({
                 className="btn-secondary api-docs-btn"
                 data-testid="view-api-docs"
                 onClick={() => {
-                  const base = (baseUri || DEFAULTS.baseUri).trim().replace(/\/+$/, '');
-                  window.open(`${base}/api-docs/`, '_blank', 'noopener,noreferrer');
+                  // Open the docs through the SAME origin the SPA is served
+                  // from. In dev Vite proxies /api-docs to the backend; in
+                  // production the backend serves the SPA and /api-docs from the
+                  // same origin. This avoids "This site can't be reached" when
+                  // the Settings Backend URI is a bare localhost:3001 or a LAN
+                  // host the browser can't reach.
+                  const url = `${window.location.origin}/api-docs/`;
+                  window.open(url, '_blank', 'noopener,noreferrer');
                 }}
               >
                 View API docs ↗

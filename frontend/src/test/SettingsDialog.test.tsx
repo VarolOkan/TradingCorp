@@ -283,21 +283,23 @@ describe('SettingsDialog Server Log tab', () => {
         initial={{ baseUri: 'https://api.example:3001/' }}
       />
     );
+    // The docs open against the SAME origin the SPA is served from (so they go
+    // through Vite's /api-docs proxy in dev), NOT the Settings Backend URI.
     fireEvent.click(screen.getByTestId('view-api-docs'));
     expect(openSpy).toHaveBeenCalledWith(
-      'https://api.example:3001/api-docs/',
+      `${window.location.origin}/api-docs/`,
       '_blank',
       'noopener,noreferrer',
     );
     openSpy.mockRestore();
   });
 
-  it('falls back to the default backend URI for API docs when the field is empty', () => {
+  it('opens API docs against the current origin (not a bare default backend URI)', () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(<SettingsDialog open onClose={onClose} />);
     fireEvent.click(screen.getByTestId('view-api-docs'));
     expect(openSpy).toHaveBeenCalledWith(
-      'http://localhost:3001/api-docs/',
+      `${window.location.origin}/api-docs/`,
       '_blank',
       'noopener,noreferrer',
     );

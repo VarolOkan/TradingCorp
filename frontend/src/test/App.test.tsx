@@ -57,7 +57,7 @@ describe('App shell', () => {
 
   it('renders the application title', () => {
     render(<App />);
-    expect(screen.getByText('Financial Analysis Pipeline')).toBeInTheDocument();
+    expect(screen.getByText('TradingCorp')).toBeInTheDocument();
   });
 
   it('renders the connection settings button', () => {

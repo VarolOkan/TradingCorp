@@ -246,7 +246,7 @@ class AnalysisServer {
       
       // Send welcome message
       socket.emit('welcome', {
-        message: 'Connected to Financial Analysis Pipeline',
+        message: 'Connected to TradingCorp',
         serverId: socket.id,
         timestamp: new Date().toISOString()
       });

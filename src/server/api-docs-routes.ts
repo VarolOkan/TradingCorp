@@ -28,12 +28,24 @@ function specPath(): string {
   return candidates[0]!;
 }
 
+// Build the servers[] entry from the actual HOST/PORT the server was started
+// with, so Swagger UI's "Servers" dropdown reflects reality (e.g.
+// http://10.9.200.188:8091) instead of the hardcoded localhost:3001 default.
+// HOST may be a hostname or an IP; PORT defaults to 3001.
+function resolveServers(): { url: string; description: string }[] {
+  const host = process.env.HOST && process.env.HOST.trim() ? process.env.HOST.trim() : 'localhost';
+  const port = process.env.PORT && process.env.PORT.trim() ? process.env.PORT.trim() : '3001';
+  // Avoid double-printing when HOST already carries a :port (defensive).
+  const base = host.includes(':') ? host : `${host}:${port}`;
+  return [{ url: `http://${base}`, description: 'Running server (from HOST/PORT env)' }];
+}
+
 const SWAGGER_HTML = `<!doctype html>
 <html lang="en" class="dark-mode">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Financial Analysis Pipeline — API docs</title>
+    <title>TradingCorp — API docs</title>
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
     <style>
       /* Swagger UI v5 ships a maintained dark theme, activated by the
@@ -94,7 +106,12 @@ export function registerApiDocsRoutes(app: Express): void {
   app.get('/api-docs/openapi.json', (_req, res) => {
     try {
       const raw = fs.readFileSync(specPath(), 'utf8');
-      res.type('application/json').send(raw);
+      const doc = JSON.parse(raw) as Record<string, unknown>;
+      // Reflect the URL the server is actually listening on (HOST/PORT env),
+      // so Swagger UI's "Servers" dropdown shows the real origin instead of
+      // the hardcoded localhost:3001 baked into the on-disk spec.
+      (doc as any).servers = resolveServers();
+      res.type('application/json').send(JSON.stringify(doc, null, 2));
     } catch (e) {
       res
         .status(500)

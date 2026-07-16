@@ -1,4 +1,4 @@
-# Financial Analysis Pipeline
+# TradingCorp
 
 A multi-agent financial analysis system built on **LangGraph** (TypeScript), a
 **React + Vite** single-page front-end, and **Socket.IO** real-time streaming.
@@ -37,7 +37,7 @@ stage rules in [PHASED_DEVELOPMENT.md](./PHASED_DEVELOPMENT.md#2-stage-rules-as-
 ## Quick start
 
 ```bash
-cd financial-analysis-pipeline
+cd TradingCorp
 npm install
 cp .env.example .env      # optional; sensible defaults exist
 npm test                  # verify backend + frontend suites pass (with coverage)
@@ -68,7 +68,7 @@ Open http://localhost:5173.
 ## Repository layout
 
 ```
-financial-analysis-pipeline/
+TradingCorp/
 ├── docs/                 # documentation (this folder)
 ├── frontend/             # React + Vite SPA (new front-end)
 │   ├── index.html

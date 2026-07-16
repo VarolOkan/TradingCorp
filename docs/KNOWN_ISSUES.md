@@ -50,6 +50,19 @@ are declared on `options_ingestion` with `onError:'degrade'` but are **not yet
 wired to the acquisition layer** — see §11 / the external-data integration work.
 `config.dataSources.alphaVantage.apiKey` is still reserved/unused.
 
+> **Screener is live (does NOT fall under "mock").** The **Stock Screener**
+> (Phase 18) pulls a **real**, ~13k-symbol tradable universe from NasdaqTrader
+> (or the S&P 500 list via `UNIVERSE_PROVIDER=sp500`) and fetches **real Yahoo
+> price bars (tokenless, delayed ~15–20 min)** per ticker. The only mock
+> involved is the per-ticker bar fallback when the chart endpoint is throttled
+> (429). The screen's `dataSource` badge is therefore `DELAYED` in the normal
+> live case (with an `N/M live` sub-count), `LIVE` when every row is on live
+> bars, and `MOCK` only when the universe itself fell back and no rows are live.
+> A `Data lineage` block shows the exact universe pipeline and warns only on a
+> genuine fallback. Do **not** treat a `DELAYED`/`MOCK` badge as a UI bug — it
+> is a semantically honest statement of the data source (see README › Stock
+> Screener).
+
 **Fix direction:** wire the `polygonHist`/`polygonOptions`/`treasuryRfr` sources
 into `acquireForAnalyst` (behind the existing retry + `onError:'degrade'` policy)
 so the options `options_ingestion` node consumes real historical price + option

@@ -15,7 +15,7 @@ import { fetchCompanyNews, type NewsFetchFn } from '../registry/logic/news';
 // return 50+ `set-cookie` headers that make undici's fetch throw
 // `HeadersOverflowError` before we can read the body. `https` lets us lift that
 // limit. Redirects are followed manually (up to 4 hops).
-const UA = 'Mozilla/5.0 (financial-analysis-pipeline)';
+const UA = 'Mozilla/5.0 (TradingCorp)';
 
 function httpsGet(url: string, redirectsLeft = 4): Promise<{
   ok: boolean;
