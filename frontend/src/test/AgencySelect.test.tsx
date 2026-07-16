@@ -1,17 +1,20 @@
 // frontend/src/test/AgencySelect.test.tsx
-// §15 — agency dropdown renders one <option> per agency and the styled pill.
+// §15 — agency dropdown renders one <option> per NON-HIDDEN agency and the styled pill.
 import { render, screen, fireEvent } from '@testing-library/react';
 import { AgencySelect } from '../components/analysts/AgencySelect';
 import { AGENCY_IDS, AGENCIES } from '../components/analysts/agencies';
 
 describe('AgencySelect', () => {
-  it('renders one <option> per agency', () => {
+  it('renders one <option> per non-hidden agency (crypto-screener is hidden by default)', () => {
     render(<AgencySelect value={AGENCY_IDS[0]} onChange={() => {}} />);
     const options = screen.getAllByRole('option');
-    expect(options.length).toBe(AGENCY_IDS.length);
-    for (const id of AGENCY_IDS) {
+    const expected = AGENCY_IDS.filter((id) => !AGENCIES[id]?.hidden);
+    expect(options.length).toBe(expected.length);
+    for (const id of expected) {
       expect(screen.getByRole('option', { name: AGENCIES[id].name })).toBeInTheDocument();
     }
+    // crypto-screener has hidden:true → must NOT be a selectable <option>.
+    expect(screen.queryByRole('option', { name: AGENCIES['crypto-screener'].name })).toBeNull();
   });
 
   it('uses the restyled pill markup (accent left-bar, custom chevron)', () => {

@@ -100,6 +100,34 @@ describe.each(drivers.filter((d) => d === 'json' || sqliteUsable))('registry rou
     expect(res.body.driver).toBe(driver);
   });
 
+  it('GET /registry hides agencies flagged hidden (crypto-screener) by default', async () => {
+    const res = await request(app).get('/registry');
+    expect(res.status).toBe(200);
+    const ids = res.body.agencies.map((a: any) => a.id);
+    expect(ids).toContain('long-term');
+    expect(ids).not.toContain('crypto-screener');
+  });
+
+  it('GET /registry reveals hidden agencies when ENABLE_CRYPTO_AGENCY=true', async () => {
+    const prev = process.env.ENABLE_CRYPTO_AGENCY;
+    process.env.ENABLE_CRYPTO_AGENCY = 'true';
+    try {
+      // Build a fresh app so the env flag is read at route-registration time
+      // of the request (the filter reads it per-request, so a fresh build is
+      // not strictly required, but keeps the intent explicit).
+      const { app: envApp } = buildFor(driver);
+      const res = await request(envApp).get('/registry');
+      expect(res.status).toBe(200);
+      const ids = res.body.agencies.map((a: any) => a.id);
+      expect(ids).toContain('crypto-screener');
+      const crypto = res.body.agencies.find((a: any) => a.id === 'crypto-screener');
+      expect(crypto.hidden).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.ENABLE_CRYPTO_AGENCY;
+      else process.env.ENABLE_CRYPTO_AGENCY = prev;
+    }
+  });
+
   it('PUT /registry/agency/:id reorders + adds an existing analyst', async () => {
     const analysts = [
       { id: 'orchestrator' }, { id: 'data_ingestion' },
@@ -117,6 +145,54 @@ describe.each(drivers.filter((d) => d === 'json' || sqliteUsable))('registry rou
       'orchestrator', 'data_ingestion', 'fundamental', 'technical',
     ]);
   });
+
+  it('PUT /registry/agency/:id persists Phase 22 screener settings (assetClass/interval/lookback) and GET reflects them', async () => {
+    const analysts = AGENCIES['long-term']!.analysts.map((r) => ({ id: r.id }));
+    const res = await request(app)
+      .put('/registry/agency/long-term?userId=user-1')
+      .send({
+        analysts,
+        assetClass: 'OPTION',
+        screenerInterval: '5m',
+        screenerLookbackDays: 12,
+      });
+    expect(res.status).toBe(200);
+
+    // Stored def carries the new fields.
+    const stored = store.getAgencyDef('user-1', 'long-term');
+    expect(stored?.assetClass).toBe('OPTION');
+    expect(stored?.screenerInterval).toBe('5m');
+    expect(stored?.screenerLookbackDays).toBe(12);
+
+    // GET summary exposes them (so the dialog + mirror can round-trip).
+    const get = await request(app).get('/registry?userId=user-1');
+    const summ = get.body.agencies.find((a: any) => a.id === 'long-term');
+    expect(summ.assetClass).toBe('OPTION');
+    expect(summ.screenerInterval).toBe('5m');
+    expect(summ.screenerLookbackDays).toBe(12);
+  });
+
+  it('POST /registry/agency persists Phase 22 fields and survives a restart', async () => {
+    const def = {
+      id: 'swing-crypto', name: 'Swing Crypto', description: 'test',
+      horizon: 'MEDIUM_TERM', assetClass: 'CRYPTO', screenerInterval: '1d', screenerLookbackDays: 60,
+      analysts: [{ id: 'orchestrator' }, { id: 'data_ingestion' }, { id: 'fundamental' }],
+    };
+    const res = await request(app).post('/registry/agency?userId=session-abc').send(def);
+    expect(res.status).toBe(201);
+    const stored = store.getAgencyDef('session-abc', 'swing-crypto');
+    expect(stored?.assetClass).toBe('CRYPTO');
+    expect(stored?.screenerInterval).toBe('1d');
+    expect(stored?.screenerLookbackDays).toBe(60);
+
+    // Restart + boot-merge: fields survive.
+    restoreRegistry();
+    applyAllOverridesToRegistry(store);
+    expect(AGENCIES['swing-crypto']?.assetClass).toBe('CRYPTO');
+    expect(AGENCIES['swing-crypto']?.screenerInterval).toBe('1d');
+    expect(AGENCIES['swing-crypto']?.screenerLookbackDays).toBe(60);
+  });
+
 
   it('PUT rejects an unknown analyst id', async () => {
     const res = await request(app)

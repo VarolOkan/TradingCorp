@@ -105,7 +105,11 @@ function generateBars(
   const bars: PriceBar[] = [];
   // Walk BACKWARD from spot so the last close equals ~spot.
   const stepMs =
-    interval === '1d' ? 24 * 3600 * 1000 : interval === '5m' ? 5 * 60 * 1000 : 60 * 1000;
+    interval === '1d' ? 24 * 3600 * 1000
+      : interval === '4h' ? 4 * 3600 * 1000
+      : interval === '1h' ? 3600 * 1000
+      : interval === '5m' ? 5 * 60 * 1000
+      : 60 * 1000;
   const vol = interval === '1d' ? 0.015 : 0.003; // per-bar stdev-ish
   let close = spot;
   const tmp: PriceBar[] = [];
@@ -237,15 +241,19 @@ export function generateMockBundle(ticker: string, profile: HistProfile = {}): H
     const count =
       interval === '1d'
         ? lookbackDays
+        : interval === '4h'
+        ? lookbackDays * 6 // ~6 4h bars per RTH day
+        : interval === '1h'
+        ? lookbackDays * 24 // ~24 1h bars per RTH day
         : interval === '5m'
         ? lookbackDays * 78 // ~78 5m bars per RTH day
         : lookbackDays * 390; // 1m bars per RTH day
     // Cap intraday bar counts so the mock stays lightweight.
-    const capped = interval === '1d' ? count : Math.min(count, 390);
+    const cap = interval === '1d' ? count : Math.min(count, 390);
     return {
       interval,
       lookback_days: lookbackDays,
-      bars: generateBars(ticker, interval, capped, spot, asOf),
+      bars: generateBars(ticker, interval, cap, spot, asOf),
     };
   });
 

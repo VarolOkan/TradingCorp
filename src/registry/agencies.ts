@@ -12,6 +12,9 @@ export const AGENCIES: Record<string, AgencyDef> = {
     name: 'Long-Term Investment',
     description: 'Full 7-node pipeline for long-term equity analysis. Matches the current production pipeline exactly — each analyst uses its default fn handler with long-term horizons.',
     horizon: 'LONG_TERM',
+    assetClass: 'EQUITY',
+    screenerInterval: '1d',
+    screenerLookbackDays: 90,
     default: true,
     // No overrides — pure defaults from ANALYST_DEFS
     analysts: [
@@ -30,6 +33,9 @@ export const AGENCIES: Record<string, AgencyDef> = {
     name: 'Medium-Term (1–3 mo)',
     description: 'Same 7 analysts but each carries timeHorizon=MEDIUM_TERM via params, demonstrating config reuse without new ids or code.',
     horizon: 'MEDIUM_TERM',
+    assetClass: 'EQUITY',
+    screenerInterval: '4h',
+    screenerLookbackDays: 45,
     analysts: [
       { id: 'orchestrator' },
       { id: 'data_ingestion' },
@@ -46,6 +52,9 @@ export const AGENCIES: Record<string, AgencyDef> = {
     name: 'Intraday',
     description: 'Same 7 analysts tuned for 5m–1h horizons. Technical gets faster lookback, sentiment is high-frequency, and every analyst carries horizon=INTRADAY.',
     horizon: 'INTRADAY',
+    assetClass: 'EQUITY',
+    screenerInterval: '5m',
+    screenerLookbackDays: 5,
     analysts: [
       { id: 'orchestrator' },
       { id: 'data_ingestion' },
@@ -60,8 +69,15 @@ export const AGENCIES: Record<string, AgencyDef> = {
   'crypto-screener': {
     id: 'crypto-screener',
     name: 'Crypto Screener',
-    description: '4-node agency proving the framework supports a different NODE COUNT and completely DIFFERENT nodes: a brand-new declarative onchain analyst + reused ingestion/sentiment/governance. Short-horizon crypto triage.',
+    description: '4-node agency proving the framework supports a different NODE COUNT and completely DIFFERENT nodes: a brand-new declarative onchain analyst + reused ingestion/sentiment/governance. Short-horizon crypto triage. (Crypto universe source is TBD — the screener falls back to the equity universe today.)',
     horizon: 'SHORT_TERM',
+    assetClass: 'CRYPTO',
+    screenerInterval: '1d',
+    screenerLookbackDays: 90,
+    // Hidden from the selectable list until real crypto universe + on-chain
+    // sources land. Flip on with ENABLE_CRYPTO_AGENCY=true — all hooks
+    // (onchain analyst, CRYPTO asset class, resolver, tests) stay intact.
+    hidden: true,
     analysts: [
       // Reuses the lifted ingestion fn handler (same as data_ingestion).
       { id: 'data_ingestion' },
@@ -85,6 +101,9 @@ export const AGENCIES: Record<string, AgencyDef> = {
     description: 'Calendar/diagonal/simple vertical structures on a multi-day to multi-week horizon. Emphasizes IV rank/skew edge + thematic direction; slower greeks (theta is a slow bleed, vega matters). Instrument: OPTION.',
     horizon: 'MEDIUM_TERM',
     instrument: 'OPTION',
+    assetClass: 'OPTION',
+    screenerInterval: '1d',
+    screenerLookbackDays: 90,
     // Pipeline (8 nodes) per spec §4.1
     analysts: [
       { id: 'orchestrator' },
@@ -104,6 +123,9 @@ export const AGENCIES: Record<string, AgencyDef> = {
     description: '0DTE / same-day structures, gamma scalping, fast underlying technical timing. Emphasizes tight liquidity, fast theta, intraday vol expansion; strict risk (no overnight gap, strict stop). Instrument: OPTION.',
     horizon: 'INTRADAY',
     instrument: 'OPTION',
+    assetClass: 'OPTION',
+    screenerInterval: '5m',
+    screenerLookbackDays: 5,
     // Pipeline (9 nodes — adds options_technical timing) per spec §4.2
     analysts: [
       { id: 'orchestrator' },

@@ -832,7 +832,7 @@ export interface WeightingStep {
 // ===========================================================================
 
 export type OptionRight = 'C' | 'P';
-export type BarInterval = '1d' | '5m' | '1m';
+export type BarInterval = '1d' | '4h' | '1h' | '5m' | '1m';
 
 /** One OHLCV price bar (daily or intraday). */
 export interface PriceBar {

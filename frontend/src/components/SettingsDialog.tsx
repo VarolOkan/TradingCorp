@@ -120,6 +120,10 @@ export function SettingsDialog({
   const [newId, setNewId] = useState('');
   const [newName, setNewName] = useState('');
   const [newHorizon, setNewHorizon] = useState('LONG_TERM');
+  const [newAssetClass, setNewAssetClass] = useState<'EQUITY' | 'OPTION' | 'CRYPTO'>('EQUITY');
+  const [newInterval, setNewInterval] = useState<'1m' | '5m' | '1h' | '4h' | '1d'>('1d');
+  const [newLookback, setNewLookback] = useState<number>(90);
+  const [newMinVolume, setNewMinVolume] = useState<number>(100_000);
   const [newAnalysts, setNewAnalysts] = useState<string[]>(['orchestrator', 'data_ingestion']);
 
   // ---- Analysts tab state ----
@@ -394,6 +398,9 @@ export function SettingsDialog({
     setNewId('');
     setNewName('');
     setNewHorizon('LONG_TERM');
+    setNewAssetClass('EQUITY');
+    setNewInterval('1d');
+    setNewLookback(90);
     setNewAnalysts(['orchestrator', 'data_ingestion']);
     setAgencyError(null);
   };
@@ -404,6 +411,10 @@ export function SettingsDialog({
     setNewId(a.id);
     setNewName(a.name);
     setNewHorizon(a.horizon);
+    setNewAssetClass(a.assetClass ?? a.instrument ?? 'EQUITY');
+    setNewInterval(a.screenerInterval ?? (a.horizon === 'INTRADAY' ? '5m' : '1d'));
+    setNewLookback(a.screenerLookbackDays ?? (a.horizon === 'INTRADAY' ? 5 : 90));
+    setNewMinVolume(a.minVolumeDaily ?? 100_000);
     // The full analyst membership isn't in the summary, so default the checkboxes
     // to the analyst ids carried by the frontend AGENCIES mirror (kept in sync
     // via applyRegistryAgencies on every load).
@@ -433,6 +444,14 @@ export function SettingsDialog({
         id,
         name: newName.trim() || id,
         horizon: newHorizon,
+        // Phase 22: persist the agency-level screener settings. CRYPTO has no
+        // equity/option instrument intent yet, so its `instrument` falls back to
+        // EQUITY (the screener ranks equity underlyings until a crypto source lands).
+        assetClass: newAssetClass,
+        instrument: newAssetClass === 'OPTION' ? 'OPTION' : 'EQUITY',
+        screenerInterval: newInterval,
+        screenerLookbackDays: newLookback,
+        minVolumeDaily: newMinVolume > 0 ? newMinVolume : 0,
         analysts: newAnalysts.map((a) => ({ id: a })),
       } as never;
       if (editAgency) {
@@ -1051,6 +1070,66 @@ export function SettingsDialog({
                   <option value="INTRADAY">Intraday</option>
                 </select>
               </label>
+              <div className="agency-screener-row">
+                <label>
+                  Asset class
+                  <select
+                    value={newAssetClass}
+                    aria-label="New agency asset class"
+                    data-testid="new-agency-assetclass"
+                    onChange={(e) => setNewAssetClass(e.target.value as 'EQUITY' | 'OPTION' | 'CRYPTO')}
+                  >
+                    <option value="EQUITY">Equity</option>
+                    <option value="OPTION">Option</option>
+                    <option value="CRYPTO">Crypto{newAssetClass === 'CRYPTO' ? ' (source TBD)' : ''}</option>
+                  </select>
+                </label>
+                <label>
+                  Screener interval
+                  <select
+                    value={newInterval}
+                    aria-label="New agency screener interval"
+                    data-testid="new-agency-interval"
+                    onChange={(e) => setNewInterval(e.target.value as '1m' | '5m' | '1h' | '4h' | '1d')}
+                  >
+                    <option value="1m">1m</option>
+                    <option value="5m">5m</option>
+                    <option value="1h">1h</option>
+                    <option value="4h">4h</option>
+                    <option value="1d">1d</option>
+                  </select>
+                </label>
+                <label>
+                  Lookback days
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={newLookback}
+                    aria-label="New agency lookback days"
+                    data-testid="new-agency-lookback"
+                    onChange={(e) => setNewLookback(Math.max(1, Math.min(365, Number(e.target.value) || 90)))}
+                  />
+                </label>
+                <label>
+                  Min volume (shares)
+                  <input
+                    type="number"
+                    min={0}
+                    step={100000}
+                    value={newMinVolume}
+                    aria-label="New agency minimum average daily volume"
+                    data-testid="new-agency-minvolume"
+                    onChange={(e) => setNewMinVolume(Math.max(0, Number(e.target.value) || 0))}
+                  />
+                </label>
+              </div>
+              <p className="settings-hint agency-screener-hint">
+                Timeframe + asset class are the agency&apos;s screener defaults — the Stock
+                Screener reads them automatically (no per-run picker). Crypto screens the
+                equity universe for now (crypto source is TBD). Min volume (0 = off) drops
+                any candidate averaging fewer shares/day than the floor.
+              </p>
               <div className="agency-create-analysts">
                 <span className="agency-create-label">Analysts</span>
                 <div className="agency-create-grid">

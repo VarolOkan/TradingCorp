@@ -230,10 +230,33 @@ export interface AgencyDef {
   description: string;
   horizon: AnalysisHorizon;
   /** Instrument class this agency trades. Optional → existing equity agencies
-   *  default to 'EQUITY' (backward compatible). Options agencies set 'OPTION'. */
+   *  default to 'EQUITY' (backward compatible). Options agencies set 'OPTION'.
+   *  @deprecated use `assetClass` (adds CRYPTO). Kept for backward compat. */
   instrument?: 'EQUITY' | 'OPTION';
+  /** Asset class this agency screens. Drives the screener's instrument intent
+   *  and (for CRYPTO) signals a future crypto universe source. Optional →
+   *  derived: OPTION if `instrument==='OPTION'`, else 'EQUITY'. */
+  assetClass?: 'EQUITY' | 'OPTION' | 'CRYPTO';
+  /** Explicit screener bar interval. Optional → derived from `horizon`
+   *  (INTRADAY ⇒ 5m, else 1d) by resolveScreenerProfile. */
+  screenerInterval?: '1m' | '5m' | '1h' | '4h' | '1d';
+  /** Explicit screener lookback in days. Optional → derived from `horizon`
+   *  (INTRADAY ⇒ 5, else 90). */
+  screenerLookbackDays?: number;
+  /** Minimum average DAILY bar volume (shares) a screener result must clear.
+   *  Optional → 0 means "no minimum" (the default, so existing agencies are
+   *  unaffected). Set in the Agency settings dialog; applied as a floor on the
+   *  row's avgVolume. The universe pre-filter also uses it (via
+   *  averageDailyVolume3Month) so a high floor trims cheaply before bars. */
+  minVolumeDaily?: number;
   /** EXACTLY ONE agency in AGENCIES should have default: true. */
   default?: boolean;
+  /** When true, the agency is NOT exposed as a selectable option unless the
+   *  env flag ENABLE_CRYPTO_AGENCY=true is set. Used to keep not-yet-ready
+   *  agencies (e.g. crypto-screener, whose universe/on-chain sources are TBD)
+   *  defined in the registry (so all hooks/tests stay intact) without showing
+   *  them in the UI. Toggle via env, not a code change. */
+  hidden?: boolean;
   /** Ordered list of analyst refs (defines graph node order). */
   analysts: AgencyAnalystRef[];
 }

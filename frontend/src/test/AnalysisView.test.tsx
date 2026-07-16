@@ -9,7 +9,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest';
 import { AnalysisView } from '../components/AnalysisView';
 import type { Socket } from 'socket.io-client';
-
+import { AGENCIES } from '../components/analysts/agencies';
 // ResultsPanel's Save button calls postReport (a real network request). Mock
 // it to resolve so the "saved → no prompt" path is exercisable in jsdom.
 vi.mock('../api/reportClient', () => ({
@@ -57,6 +57,13 @@ function panels() {
 }
 
 describe('AnalysisView — agency-first UX', () => {
+  // crypto-screener is hidden by default (no real crypto sources yet). This
+  // block exercises the 4-node wall path (a hook that must stay intact), so
+  // reveal it for the duration of the block.
+  const prevHidden = AGENCIES['crypto-screener']?.hidden;
+  beforeAll(() => { AGENCIES['crypto-screener'].hidden = false; });
+  afterAll(() => { if (prevHidden === undefined) delete AGENCIES['crypto-screener'].hidden; else AGENCIES['crypto-screener'].hidden = prevHidden; });
+
   it('renders the agency selector above the ticker input (first analysis control)', () => {
     const { container } = render(<AnalysisView socket={fakeSocket()} connected={true} />);
     const agency = screen.getByLabelText(/Select analysis agency/i);
@@ -117,6 +124,13 @@ const COMPLETE = {
 };
 
 describe('AnalysisView — agency-switch unsaved-results guard', () => {
+  // crypto-screener is hidden by default (no real crypto sources yet). These
+  // tests exercise the 4-node wall + switch-guard paths (hooks that must stay
+  // intact), so reveal it for the duration of this block.
+  const prevHidden = AGENCIES['crypto-screener']?.hidden;
+  beforeAll(() => { AGENCIES['crypto-screener'].hidden = false; });
+  afterAll(() => { if (prevHidden === undefined) delete AGENCIES['crypto-screener'].hidden; else AGENCIES['crypto-screener'].hidden = prevHidden; });
+
   it('no prompt when there is no completed result (clean slate switch)', () => {
     render(<AnalysisView socket={recordingSocket() as any} connected={true} />);
     const agency = screen.getByLabelText(/Select analysis agency/i) as HTMLSelectElement;

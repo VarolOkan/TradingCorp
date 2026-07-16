@@ -52,6 +52,10 @@ export interface Quote {
   price: number;
   /** Market cap in USD. Optional — some sources omit it. */
   marketCap?: number;
+  /** Average daily VOLUME in shares (e.g. Yahoo averageDailyVolume3Month).
+   *  Optional; used by the screener's min-volume pre-filter (share units, so
+   *  it matches the row-level avgVolume floor exactly). */
+  averageDailyVolume3Month?: number;
   /** Average daily dollar volume (price * shares), USD. Optional. */
   advUsd?: number;
   exchange?: Exchange;

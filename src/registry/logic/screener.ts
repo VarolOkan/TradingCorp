@@ -29,9 +29,16 @@ export interface ScreenerOptions {
   /** Max tickers to return (top-N by promise score). Default 8. */
   limit?: number;
   /** Bar interval for the technical read. Default '1d'. */
-  interval?: '1m' | '5m' | '1d';
+  interval?: '1m' | '5m' | '1h' | '4h' | '1d';
   /** Lookback in days for bars. Default 90. */
   lookbackDays?: number;
+  /**
+   * Instrument intent: 'EQUITY' (default) or 'OPTION'. The screener always
+   * ranks equity underlyings; 'OPTION' lets the caller mark that they intend
+   * optionable underlyings and surfaces an honest note. Per-option greeks
+   * ranking is a later phase and is NOT faked here (see docs/SCREENER_STANDARDS.md).
+   */
+  instrument?: 'EQUITY' | 'OPTION';
   /** Max concurrent ticker evaluations. Default 6. */
   concurrency?: number;
   /** Injected price fetch (tests / no-network). */
@@ -50,6 +57,10 @@ export interface ScreenerOptions {
    * so this bounds the per-ticker bar/news calls so the screen stays fast.
    */
   maxScreenUniverse?: number;
+  /** Minimum average DAILY bar volume (shares) a result must clear. 0 (default)
+   *  = no minimum. Rows whose avgVolume is below this are dropped; the universe
+   *  pre-filter (when quotes carry averageDailyVolume3Month) also trims cheaply. */
+  minVolumeDaily?: number;
 }
 
 export interface ScreenerRow {
@@ -64,6 +75,10 @@ export interface ScreenerRow {
   momentum: number;
   /** 0..100 volatility-quality axis (lower vol = higher). */
   stability: number;
+  /** Mean share volume across the bars actually evaluated (interval-dependent).
+   *  For 1d/4h screens this approximates daily liquidity; for 5m/1m it is the
+   *  per-bar mean (smaller). Always present, 0 when no volume data. */
+  avgVolume: number;
   verdict: 'STRONG' | 'WATCH' | 'WEAK';
   /** Which axis the agency weighted most (for the UI hint). */
   topAxis: 'technical' | 'sentiment' | 'fundamental' | 'risk' | 'onchain';
@@ -88,8 +103,15 @@ export interface ScreenerResult {
   elapsedMs: number;
   /** Truthful data-source badge for the whole screen (see DataSourceBadge). */
   dataSource: DataSourceBadge;
+  /** Count of rows whose price bars came from a live source (yahoo). */
+  liveRows: number;
+  /** Volume-gate summary: how many symbols/rows were dropped by the min-volume
+   *  floor (pre-filter + row-level). 0 when no minimum is set. */
+  minVolumeDropped?: number;
   /** Step-by-step universe pipeline trace (which source won, listed->parsed->prefiltered). */
   universeTrace?: UniverseTrace;
+  /** Instrument intent this screen was run with ('EQUITY' | 'OPTION'). */
+  instrument?: 'EQUITY' | 'OPTION';
   note?: string;
 }
 
@@ -263,6 +285,9 @@ async function evaluateTicker(
   ]);
 
   const closes = barsRes.bars.map((b) => b.close);
+  const volumes = barsRes.bars.map((b) => b.volume);
+  const totalVol = volumes.reduce((s, v) => s + v, 0);
+  const avgVolume = volumes.length ? totalVol / volumes.length : 0;
   const technical = technicalPromiseScore(closes);
   const momentum = momentumScore(closes);
   const stability = stabilityScore(closes);
@@ -291,6 +316,7 @@ async function evaluateTicker(
     sentiment: Math.round(sentiment),
     momentum: Math.round(momentum),
     stability: Math.round(stability),
+    avgVolume: Math.round(avgVolume),
     verdict: verdictFor(promise),
     topAxis: topAxis(weights),
     barsSource: barsRes.source,
@@ -325,8 +351,10 @@ async function mapPool<T, R>(items: T[], worker: (item: T) => Promise<R>, concur
 const INTRADAY_SCREENER_AGENCIES: string[] = ['intraday', 'options-intraday'];
 
 export interface ScreenerProfile {
-  interval: '1m' | '5m' | '1d';
+  interval: '1m' | '5m' | '1h' | '4h' | '1d';
   lookbackDays: number;
+  /** Minimum average daily bar volume (shares) the agency screens for. 0 = off (explicit). */
+  minVolumeDaily: number;
 }
 
 /**
@@ -334,12 +362,36 @@ export interface ScreenerProfile {
  * this, every agency screened on the same default (1d / 90d) bars and returned
  * an identical ranking — which is what made intraday and long-term look the
  * same. Intraday agencies get short, high-granularity bars; the rest get daily.
+ * minVolumeDaily is the per-agency floor (set in the Agency settings dialog);
+ * default 100000 shares/day, 0 means explicitly off.
  */
-export function resolveScreenerProfile(agencyId: string): ScreenerProfile {
-  if (INTRADAY_SCREENER_AGENCIES.includes(agencyId)) {
-    return { interval: '5m', lookbackDays: 5 };
+export function resolveScreenerProfile(
+  agencyId: string,
+  agencyDef?: { horizon?: string; assetClass?: string; instrument?: string; screenerInterval?: '1m' | '5m' | '1h' | '4h' | '1d'; screenerLookbackDays?: number; minVolumeDaily?: number },
+): ScreenerProfile {
+  // Explicit agency fields win (set in the Agency settings dialog).
+  if (agencyDef?.screenerInterval && agencyDef?.screenerLookbackDays) {
+    return {
+      interval: agencyDef.screenerInterval,
+      lookbackDays: agencyDef.screenerLookbackDays,
+      minVolumeDaily: agencyDef.minVolumeDaily ?? 100_000,
+    };
   }
-  return { interval: '1d', lookbackDays: 90 };
+  // Fall back to the implicit horizon rule (intraday ⇒ 5m/5d, else 1d/90d).
+  if (INTRADAY_SCREENER_AGENCIES.includes(agencyId)) {
+    return { interval: '5m', lookbackDays: 5, minVolumeDaily: agencyDef?.minVolumeDaily ?? 100_000 };
+  }
+  return { interval: '1d', lookbackDays: 90, minVolumeDaily: agencyDef?.minVolumeDaily ?? 100_000 };
+}
+
+/** Resolve the instrument intent from an agency's assetClass/instrument.
+ *  OPTION ⇒ 'OPTION'; CRYPTO ⇒ 'EQUITY' (screen equity underlyings — the
+ *  crypto universe source is still TBD); everything else ⇒ 'EQUITY'. */
+export function resolveScreenerInstrument(
+  agencyDef?: { assetClass?: string; instrument?: string },
+): 'EQUITY' | 'OPTION' {
+  const ac = agencyDef?.assetClass ?? agencyDef?.instrument;
+  return ac === 'OPTION' ? 'OPTION' : 'EQUITY';
 }
 
 // Deterministic, seedable shuffle (mulberry32 + Fisher-Yates) so the screener
@@ -365,8 +417,10 @@ function seededShuffle<T>(items: T[], seed = 0x9e3779b9): T[] {
 }
 
 export async function screenTickers(agencyId: string, options: ScreenerOptions = {}): Promise<ScreenerResult> {
+  const minVolumeDaily = options.minVolumeDaily ?? 0;
   let universeTrace: UniverseTrace | undefined;
   let universe: string[];
+  let universeQuotes: Map<string, { avgDailyVolume?: number }> = new Map();
   if (options.universe && options.universe.length) {
     universe = options.universe;
   } else {
@@ -376,12 +430,35 @@ export async function screenTickers(agencyId: string, options: ScreenerOptions =
     const u = await getUniverse(uOpts);
     universeTrace = u.trace;
     universe = u.quotes.map((q) => q.ticker);
+    universeQuotes = new Map<string, { avgDailyVolume?: number }>(
+      u.quotes.map((q) => [q.ticker, q.averageDailyVolume3Month != null ? { avgDailyVolume: q.averageDailyVolume3Month } : {}] as [string, { avgDailyVolume?: number }]),
+    );
   }
   const limit = options.limit ?? 15;
   // Bounded screen set: the raw universe can be ~13k; without priced quotes we
   // can't pre-trim it, so cap how many symbols we actually score (bounds the
   // per-ticker bar/news calls). Priced pre-filtered pools are already small.
   const maxScreen = options.maxScreenUniverse ?? 400;
+  // Cheap volume pre-filter (only when a floor is set AND quotes carry ADV).
+  // averageDailyVolume3Month is a single quote call per ticker — far cheaper
+  // than fetching full bars — so a high floor trims the screen set BEFORE the
+  // per-ticker bar/news work. The row-level avgVolume floor (below) is the
+  // authoritative gate; this is just a fast pre-trim.
+  let minVolumePreTrim = 0;
+  if (minVolumeDaily > 0 && universeQuotes.size > 0) {
+    const before = universe.length;
+    universe = universe.filter((t) => {
+      const adv = universeQuotes.get(t)?.avgDailyVolume;
+      // Unknown ADV (unpriced live pool / quote endpoint blocked / rate-limited)
+      // must NOT be dropped here — defer to the row-level avgVolume gate, which
+      // scores real bar volume. Only drop when we actually have a quote ADV
+      // below the floor. Otherwise a blocked quote endpoint would wipe the
+      // whole universe for any non-zero floor.
+      if (adv == null) return true;
+      return adv >= minVolumeDaily;
+    });
+    minVolumePreTrim = before - universe.length;
+  }
   if (universe.length > maxScreen) {
     // De-bias before capping. The raw universe (e.g. nasdaqtrader) is returned
     // alphabetically; a naive slice(0, N) would always screen the A… tickers
@@ -408,6 +485,14 @@ export async function screenTickers(agencyId: string, options: ScreenerOptions =
   );
 
   rows.sort((a, b) => b.promise - a.promise);
+  // Authoritative volume gate: drop rows whose avgVolume is below the floor.
+  // minVolumeDaily=0 means no minimum (default; existing agencies unaffected).
+  let minVolumeDropped = 0;
+  let passed = rows;
+  if (minVolumeDaily > 0) {
+    passed = rows.filter((r) => r.avgVolume >= minVolumeDaily);
+    minVolumeDropped = rows.length - passed.length;
+  }
   const elapsedMs = Date.now() - start;
 
   // Truthful badge. The universe being LIVE is the headline fact (the user
@@ -425,16 +510,31 @@ export async function screenTickers(agencyId: string, options: ScreenerOptions =
   if (universeFellBack && liveRows === 0) dataSource = 'MOCK';
   else if (liveRows === rows.length && !universeFellBack) dataSource = 'DELAYED'; // real universe + real bars
 
+  const instrument = options.instrument ?? 'EQUITY';
   return {
     agencyId,
     weights,
-    rows: rows.slice(0, limit),
+    rows: passed.slice(0, limit),
     universeSize: universe.length,
     screenedAt: new Date().toISOString(),
     elapsedMs,
     dataSource,
     liveRows,
-    universeTrace,
-    note: 'LLM-free screen: technical/momentum/volatility from price bars + news sentiment. Weights reflect the selected agency.',
+    minVolumeDropped,
+    universeTrace: universeTrace
+      ? {
+          ...universeTrace,
+          gates: {
+            ...(universeTrace.gates ?? {}),
+            ...(minVolumeDaily > 0
+              ? { minVolume: minVolumePreTrim + minVolumeDropped }
+              : {}),
+          },
+        }
+      : universeTrace,
+    instrument,
+    note: instrument === 'OPTION'
+      ? 'LLM-free screen: technical/momentum/volatility from price bars + news sentiment; ranks equity underlyings you can trade options on. Per-option greeks ranking is a later phase. Weights reflect the selected agency.'
+      : 'LLM-free screen: technical/momentum/volatility from price bars + news sentiment. Weights reflect the selected agency.',
   };
 }

@@ -94,6 +94,7 @@ export function makeYahooQuoteProvider(opts: QuoteProviderOpts = {}): {
                   ticker: t,
                   price,
                   ...(q.marketCap != null ? { marketCap: q.marketCap } : {}),
+                  ...(q.averageDailyVolume3Month != null ? { averageDailyVolume3Month: q.averageDailyVolume3Month } : {}),
                   advUsd: adv,
                 };
                 if (q.exchangeName) quote.exchange = q.exchangeName as string as Exchange;

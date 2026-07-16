@@ -16,6 +16,10 @@ export interface AgencySelectProps {
 
 export function AgencySelect({ value, onChange, disabled = false }: AgencySelectProps) {
   const current = AGENCIES[value];
+  // Agencies flagged `hidden` (e.g. crypto-screener until real crypto sources
+  // land) are omitted from the selectable dropdown. They remain fully usable
+  // by id, so all hooks/tests stay intact.
+  const selectableIds = AGENCY_IDS.filter((id) => !AGENCIES[id]?.hidden);
   return (
     <label className="agency-select" title={current?.description ?? ''}>
       <span className="agency-select-label">Agency</span>
@@ -27,7 +31,7 @@ export function AgencySelect({ value, onChange, disabled = false }: AgencySelect
           aria-label="Select analysis agency"
           disabled={disabled}
         >
-          {AGENCY_IDS.map((id) => (
+          {selectableIds.map((id) => (
             <option key={id} value={id}>
               {AGENCIES[id].name}
             </option>

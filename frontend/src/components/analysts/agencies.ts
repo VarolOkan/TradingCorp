@@ -22,6 +22,16 @@ export interface AgencyMeta {
   /** horizon label for display. */
   horizon?: string;
   instrument?: 'EQUITY' | 'OPTION';
+  /** Asset class this agency screens (EQUITY / OPTION / CRYPTO). */
+  assetClass?: 'EQUITY' | 'OPTION' | 'CRYPTO';
+  /** Explicit screener bar interval (optional — derived from horizon if unset). */
+  screenerInterval?: '1m' | '5m' | '1h' | '4h' | '1d';
+  /** Explicit screener lookback in days (optional — derived from horizon if unset). */
+  screenerLookbackDays?: number;
+  /** Minimum average DAILY bar volume (shares) the agency screens for. Phase 25. */
+  minVolumeDaily?: number;
+  /** True when gated off by default (env ENABLE_CRYPTO_AGENCY to reveal). */
+  hidden?: boolean;
 }
 
 // Static defaults — overwritten by applyRegistryAgencies() at runtime.
@@ -39,6 +49,9 @@ export const AGENCIES: Record<string, AgencyMeta> = {
       'risk',
       'governance',
     ],
+    assetClass: 'EQUITY',
+    screenerInterval: '1d',
+    screenerLookbackDays: 90,
   },
   'medium-term': {
     id: 'medium-term',
@@ -53,6 +66,10 @@ export const AGENCIES: Record<string, AgencyMeta> = {
       'risk',
       'governance',
     ],
+    assetClass: 'EQUITY',
+    screenerInterval: '4h',
+    screenerLookbackDays: 45,
+    minVolumeDaily: 100_000,
   },
   intraday: {
     id: 'intraday',
@@ -67,12 +84,20 @@ export const AGENCIES: Record<string, AgencyMeta> = {
       'risk',
       'governance',
     ],
+    assetClass: 'EQUITY',
+    screenerInterval: '5m',
+    screenerLookbackDays: 5,
   },
   'crypto-screener': {
     id: 'crypto-screener',
     name: 'Crypto Screener',
-    description: '4-node crypto triage: ingestion + on-chain flow + sentiment + governance.',
+    description: '4-node crypto triage: ingestion + on-chain flow + sentiment + governance. (Crypto universe source is TBD — today the screener falls back to the equity universe.)',
     analysts: ['data_ingestion', 'onchain', 'sentiment', 'governance'],
+    assetClass: 'CRYPTO',
+    screenerInterval: '1d',
+    screenerLookbackDays: 90,
+    // Hidden from the selectable dropdown until real crypto sources land.
+    hidden: true,
   },
   'options-swing': {
     id: 'options-swing',
@@ -88,6 +113,10 @@ export const AGENCIES: Record<string, AgencyMeta> = {
       'options_risk',
       'governance',
     ],
+    instrument: 'OPTION',
+    assetClass: 'OPTION',
+    screenerInterval: '1d',
+    screenerLookbackDays: 90,
   },
   'options-intraday': {
     id: 'options-intraday',
@@ -104,6 +133,10 @@ export const AGENCIES: Record<string, AgencyMeta> = {
       'options_risk',
       'governance',
     ],
+    instrument: 'OPTION',
+    assetClass: 'OPTION',
+    screenerInterval: '5m',
+    screenerLookbackDays: 5,
   },
 };
 
@@ -119,6 +152,28 @@ export function isIntradayAgency(id: string): boolean {
   return INTRADAY_AGENCIES.includes(id);
 }
 
+/**
+ * Phase 22: timeframe + instrument are AGENCY-LEVEL settings, not panel inputs.
+ * Resolve the screener's bar interval + lookback from an agency's explicit
+ * (editable) defaults, falling back to the implicit horizon rule.
+ */
+export function resolveScreenerProfile(agencyId: string): { interval: '1m' | '5m' | '1h' | '4h' | '1d'; lookbackDays: number; minVolumeDaily: number } {
+  const def = AGENCIES[agencyId];
+  if (def?.screenerInterval && def?.screenerLookbackDays) {
+    return { interval: def.screenerInterval, lookbackDays: def.screenerLookbackDays, minVolumeDaily: def.minVolumeDaily ?? 100_000 };
+  }
+  return isIntradayAgency(agencyId)
+    ? { interval: '5m', lookbackDays: 5, minVolumeDaily: 100_000 }
+    : { interval: '1d', lookbackDays: 90, minVolumeDaily: 100_000 };
+}
+
+/** Resolve the asset class from an agency (OPTION if declared, else EQUITY).
+ *  CRYPTO is shown as a selectable category but screens equity underlyings
+ *  today (the crypto universe source is still TBD). */
+export function resolveAssetClass(agencyId: string): 'EQUITY' | 'OPTION' | 'CRYPTO' {
+  return AGENCIES[agencyId]?.assetClass ?? AGENCIES[agencyId]?.instrument ?? 'EQUITY';
+}
+
 export function agencyById(id: string): AgencyMeta {
   const found = AGENCIES[id];
   if (!found) throw new Error(`Unknown agency: ${id}`);
@@ -130,7 +185,7 @@ export function agencyById(id: string): AgencyMeta {
  * re-org or agency CRUD shows up in the dropdown/wall immediately.
  */
 export function applyRegistryAgencies(
-  agencies: Array<{ id: string; name: string; description?: string; analystCount?: number; isDefault?: boolean; horizon?: string; instrument?: 'EQUITY' | 'OPTION'; analysts?: string[] }>,
+  agencies: Array<{ id: string; name: string; description?: string; analystCount?: number; isDefault?: boolean; horizon?: string; instrument?: 'EQUITY' | 'OPTION'; assetClass?: 'EQUITY' | 'OPTION' | 'CRYPTO'; screenerInterval?: '1m' | '5m' | '1d'; screenerLookbackDays?: number; minVolumeDaily?: number; hidden?: boolean; analysts?: string[] }>,
 ): void {
   // Preserve full analyst id lists where the backend summary lacks them
   // (the GET /registry `agencies` list carries analystCount, not the ids).
@@ -148,6 +203,11 @@ export function applyRegistryAgencies(
       isDefault: a.isDefault,
       horizon: a.horizon,
       instrument: a.instrument,
+      assetClass: a.assetClass ?? a.instrument,
+      screenerInterval: a.screenerInterval ?? prev?.screenerInterval,
+      screenerLookbackDays: a.screenerLookbackDays ?? prev?.screenerLookbackDays,
+      minVolumeDaily: a.minVolumeDaily ?? prev?.minVolumeDaily,
+      hidden: a.hidden ?? prev?.hidden,
     };
   }
   // Drop any agency that existed locally but is no longer reported (deleted).

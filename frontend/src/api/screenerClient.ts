@@ -15,6 +15,8 @@ export interface ScreenerRow {
   newsSource: string;
   /** ISO timestamp of the underlying price-bar data (as-of). */
   asOf: string;
+  /** Average bar volume (shares) across the bars evaluated for this row. */
+  avgVolume?: number;
 }
 
 export type DataSourceBadge = 'LIVE' | 'DELAYED' | 'MOCK';
@@ -61,6 +63,8 @@ export interface ScreenerResult {
   dataSource: DataSourceBadge;
   /** Count of rows whose price bars came from a live source (yahoo). */
   liveRows: number;
+  /** Instrument intent this screen was run with ('EQUITY' | 'OPTION'). */
+  instrument?: 'EQUITY' | 'OPTION';
   /** Step-by-step universe pipeline trace (visibility into the backend). */
   universeTrace?: UniverseTrace;
   note?: string;
@@ -68,7 +72,7 @@ export interface ScreenerResult {
 
 export async function getScreener(
   agencyId: string,
-  opts: { limit?: number; universe?: string[]; interval?: '1m' | '5m' | '1d'; lookbackDays?: number } = {},
+  opts: { limit?: number; universe?: string[]; interval?: '1m' | '5m' | '1h' | '4h' | '1d'; lookbackDays?: number; instrument?: 'EQUITY' | 'OPTION'; minVolumeDaily?: number } = {},
 ): Promise<ScreenerResult> {
   const params = new URLSearchParams();
   params.set('agencyId', agencyId);
@@ -76,6 +80,8 @@ export async function getScreener(
   if (opts.universe && opts.universe.length) params.set('universe', opts.universe.join(','));
   if (opts.interval) params.set('interval', opts.interval);
   if (opts.lookbackDays) params.set('lookbackDays', String(opts.lookbackDays));
+  if (opts.minVolumeDaily != null) params.set('minVolumeDaily', String(opts.minVolumeDaily));
+  if (opts.instrument) params.set('instrument', opts.instrument);
   const res = await fetch(`/screener?${params.toString()}`);
   if (!res.ok) throw new Error(`Screener failed: ${res.status}`);
   return res.json() as Promise<ScreenerResult>;

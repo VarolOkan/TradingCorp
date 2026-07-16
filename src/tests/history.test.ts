@@ -82,6 +82,24 @@ describe('fetchPriceBars (Phase I)', () => {
     expect(r.source).toBe('mock');
     expect(r.bars.length).toBeGreaterThan(0);
   });
+
+  it('Phase 22: 1h and 4h mock bars are spaced at the correct step (honest, not mislabeled 1m)', async () => {
+    const h1 = await fetchPriceBars('AAPL', { interval: '1h', lookbackDays: 2 });
+    const h4 = await fetchPriceBars('AAPL', { interval: '4h', lookbackDays: 2 });
+    expect(h1.source).toBe('mock');
+    expect(h4.source).toBe('mock');
+    // 1h step = 3,600,000 ms; 4h step = 14,400,000 ms.
+    const step = (a: typeof h1) =>
+      new Date(a.bars[a.bars.length - 1].t).getTime() -
+      new Date(a.bars[a.bars.length - 2].t).getTime();
+    expect(step(h1)).toBe(3600_000);
+    expect(step(h4)).toBe(14_400_000);
+    // Intraday bars carry vwap; 1h/4h bar counts are capped at 390.
+    expect(h1.bars[0].vwap).toBeDefined();
+    expect(h4.bars[0].vwap).toBeDefined();
+    expect(h1.bars.length).toBeLessThanOrEqual(390);
+    expect(h4.bars.length).toBeLessThanOrEqual(390);
+  });
 });
 
 describe('GET /history route (Phase I)', () => {

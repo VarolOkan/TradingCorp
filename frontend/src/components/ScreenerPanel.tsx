@@ -6,7 +6,7 @@
 // the ticker straight into the analysis tool.
 import { useState, useRef, useEffect } from 'react';
 import { getScreener, type ScreenerResult, type ScreenerRow, type UniverseTrace } from '../api/screenerClient';
-import { isIntradayAgency } from './analysts/agencies';
+import { agencyById, resolveScreenerProfile, resolveAssetClass } from './analysts/agencies';
 
 export interface ScreenerPanelProps {
   agencyId: string;
@@ -25,6 +25,16 @@ function axisLabel(axis: ScreenerRow['topAxis']): string {
 
 function verdictClass(v: ScreenerRow['verdict']): string {
   return `screener-verdict screener-verdict-${v.toLowerCase()}`;
+}
+
+/** Human-readable share volume (e.g. 9.0M, 1.2B, 950K). avgVolume may be
+ *  undefined (older servers); render an em dash rather than a lie. */
+function fmtVolume(v?: number): string {
+  if (v == null) return '—';
+  if (v >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
+  return String(v);
 }
 
 /** Sortable column header — click toggles ASC -> DESC -> ASC. Shows ▲/▼. */
@@ -169,6 +179,10 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
     key: null,
     dir: 'asc',
   });
+  // Phase 22: timeframe + instrument are AGENCY-LEVEL (no panel inputs).
+  // Resolve them once per run from the selected agency's defaults.
+  const profile = resolveScreenerProfile(agencyId);
+  const assetClass = resolveAssetClass(agencyId);
 
   const toggleSort = (key: keyof ScreenerRow) => {
     setSort((prev) =>
@@ -204,13 +218,11 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
     const startedAt = Date.now();
     timerRef.current = setInterval(() => setRunMs(Date.now() - startedAt), 100) as unknown as number;
     try {
-      // Intraday agencies screen on short, granular bars; everyone else on
-      // daily bars. This is what makes intraday vs long-term produce different
-      // rankings instead of the same list.
-      const profile = isIntradayAgency(agencyId)
-        ? { interval: '5m' as const, lookbackDays: 5 }
-        : { interval: '1d' as const, lookbackDays: 90 };
-      const res = await getScreener(agencyId, { limit, ...profile });
+      // Phase 22: timeframe + instrument come from the AGENCY (no panel inputs).
+      // The agency's editable defaults (screenerInterval/screenerLookbackDays)
+      // resolve to a profile; assetClass drives EQUITY vs OPTION intent.
+      const inst = assetClass === 'OPTION' ? 'OPTION' : 'EQUITY';
+      const res = await getScreener(agencyId, { limit, ...profile, instrument: inst });
       setData(res);
     } catch (e: any) {
       setErr(e?.message ?? 'Screener request failed');
@@ -243,6 +255,19 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
         <span className="screener-sub">
           most promising for <strong>{agencyId}</strong>
         </span>
+        {/* Phase 22: the resolved agency-default timeframe + asset class, shown
+            inline with the sub-line so it reads "most promising for <agency>
+            [5m · 5d · EQUITY]". It re-derives from `agencyId` on every switch. */}
+        <span
+          className="screener-agency-default"
+          data-testid="screener-agency-default"
+          title="Timeframe + asset class are set per-agency in the Agency settings dialog."
+        >
+          {profile.interval} · {profile.lookbackDays}d · {assetClass}
+          {assetClass === 'CRYPTO' && (
+            <span className="screener-asset-note"> (universe source TBD)</span>
+          )}
+        </span>
         {!open && (
           <button type="button" className="screener-run" data-testid="screener-run-collapsed" onClick={run}>
             Run
@@ -272,6 +297,15 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
             )}
           </span>
         )}
+        {data && data.instrument === 'OPTION' && (
+          <span
+            className="screener-instrument-badge"
+            data-testid="screener-instrument-badge"
+            title="Screening equity underlyings you can trade options on. Per-option greeks ranking is a later phase."
+          >
+            OPTION-LISTED
+          </span>
+        )}
       </div>
 
       {/* Body is always mounted and toggled via the .collapsible wrapper's
@@ -288,6 +322,12 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
               >
                 {loading ? `Screening… ${(runMs / 1000).toFixed(1)}s` : 'Run screener'}
               </button>
+
+              {/* Phase 22: timeframe + asset class are AGENCY-LEVEL settings
+                  (edited in the Agency settings dialog), not panel inputs.
+                  The readout now lives in the header next to "most promising
+                  for <agency>" and updates when the agency switches. */}
+
               {loading && (
                 <span className="screener-elapsed screener-running" data-testid="screener-running">
                   {Math.floor(runMs / 1000)}s elapsed
@@ -317,6 +357,7 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
                     <SortableTh label="Sent" testId="screener-col-sentiment" colKey="sentiment" sortKey={sort.key} dir={sort.dir} onSort={toggleSort} />
                     <SortableTh label="Mom" testId="screener-col-momentum" colKey="momentum" sortKey={sort.key} dir={sort.dir} onSort={toggleSort} />
                     <SortableTh label="Verdict" testId="screener-col-verdict" colKey="verdict" sortKey={sort.key} dir={sort.dir} onSort={toggleSort} />
+                    <SortableTh label="Volume" testId="screener-col-avgVolume" colKey="avgVolume" sortKey={sort.key} dir={sort.dir} onSort={toggleSort} />
                     <th data-testid="screener-col-action">Action</th>
                   </tr>
                 </thead>
@@ -344,6 +385,7 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
                       <td className={verdictClass(r.verdict)} data-testid={`screener-verdict-${r.ticker}`}>
                         {r.verdict}
                       </td>
+                      <td data-testid={`screener-volume-${r.ticker}`}>{fmtVolume(r.avgVolume)}</td>
                       <td>
                         <button
                           type="button"
@@ -373,6 +415,7 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
                 <span><strong>Sent</strong> — news sentiment (−100..100, averaged headline polarity).</span>
                 <span><strong>Mom</strong> — momentum: trailing return, normalized.</span>
                 <span><strong>Verdict</strong> — STRONG (≥62) / WATCH (48–61) / WEAK (&lt;48).</span>
+                <span><strong>Volume</strong> — avg bar volume (shares) over the screened window; sortable, and respects the agency's min-volume floor.</span>
               </div>
             )}
         </div>

@@ -161,5 +161,55 @@ sub-story. If you change any threshold in §3, bump this doc's version and the `
 
 ---
 
-*Doc version 1.0 — generated to close the "which document specifies screener standards"
-gap. Source of truth remains the code; this file is the human-readable mirror.*
+## 8. Screener horizon + asset class are agency-level defaults (Phase 22)
+
+> **History:** Phase 3 added two per-run selects (Timeframe + Instrument) to the
+> Stock Screener panel *above the Run button*. Those manual selects were
+> **removed** in Phase 22. Rationale: the horizon and instrument are properties
+> of the *agency* (a "medium-term equity" agency should always screen on its
+> declared horizon), not something to re-pick on every run. Re-picking invited
+> mismatches (screening an intraday agency on 1d bars) and duplicated state that
+> could drift from the agency definition.
+
+The screener now derives horizon + asset class **entirely from the selected
+agency**. There are no per-run controls; instead each agency carries three
+explicit, editable fields (`src/types/registry.ts` → `AgencyDef`):
+
+| Field | Values | Meaning |
+|---|---|---|
+| `assetClass` | `EQUITY` \| `OPTION` \| `CRYPTO` | what the agency trades. `OPTION` ⇒ screen ranks equity underlyings you can trade options on (honest `OPTION-LISTED` badge; per-option greeks ranking is a later phase, **not** faked). `CRYPTO` is selectable but **not yet screenable** — the crypto-screener agency is **hidden from the dropdown by default** (`hidden: true` + env `ENABLE_CRYPTO_AGENCY=true` to reveal) because there is no real crypto universe / on-chain source yet. All hooks (the `onchain` analyst, `CRYPTO` enum, resolver, tests) stay in place. |
+| `screenerInterval` | `1m` \| `5m` \| `1h` \| `4h` \| `1d` | bar interval passed to `fetchPriceBars`. Every value maps to a **real** bar generator in `hist.ts` (1h step 3.6M ms, 4h step 14.4M ms) — there are **no fake weekly/monthly intervals**. |
+| `screenerLookbackDays` | number | how far back to pull bars. |
+
+**Resolution** (`src/registry/logic/screener.ts` → `resolveScreenerProfile(agencyId, agencyDef?)`):
+explicit agency fields win; anything unset falls back to the category default below.
+
+### Category defaults
+
+| Agency | assetClass | interval | lookbackDays |
+|---|---|---|---|
+| long-term | EQUITY | 1d | 90 |
+| medium-term | EQUITY | 1d | 90 |
+| intraday | EQUITY | 5m | 5 |
+| crypto-screener | CRYPTO | 1d | 90 |
+| options-swing | OPTION | 1d | 90 |
+| options-intraday | OPTION | 5m | 5 |
+
+### Editing
+
+The three fields are edited in the **Agency settings dialog** (Settings ▸
+Agencies ▸ New/Edit), laid out on a single row (`.agency-screener-row`:
+Asset class · Screener interval · Lookback days). Saving persists them via
+`PUT/POST /registry/agency` (`registry-routes.ts` `summarize()` exposes them;
+the frontend mirror in `analysts/agencies.ts` carries them through
+`applyRegistryAgencies`).
+
+### UI readout
+
+The Stock Screener header shows the resolved profile inline as a badge behind
+the heading — `most promising for <agency> [interval · lookbackDays · assetClass]`
+(e.g. `[1d · 90d · EQUITY]`). It recomputes when you switch agencies, so the
+badge always reflects the horizon the next Run will actually use.
+
+*Doc version 1.2 — Phase 22: removed the per-run Timeframe/Instrument selects;
+horizon + asset class are now agency-level defaults (incl. 1h/4h intervals).*

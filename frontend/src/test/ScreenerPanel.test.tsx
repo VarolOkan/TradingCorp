@@ -22,6 +22,7 @@ const mockResult = {
       barsSource: 'yahoo' as const,
       newsSource: 'yahoo',
       asOf: new Date().toISOString(),
+      avgVolume: 9_500_000,
     },
   ],
   universeSize: 1,
@@ -53,9 +54,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-function lastCallArgs(): { limit?: number; interval?: string; lookbackDays?: number } {
+function lastCallArgs(): { limit?: number; interval?: string; lookbackDays?: number; minVolumeDaily?: number } {
   const calls = (getScreener as ReturnType<typeof vi.fn>).mock.calls;
-  return (calls[calls.length - 1]?.[1] ?? {}) as { limit?: number; interval?: string; lookbackDays?: number };
+  return (calls[calls.length - 1]?.[1] ?? {}) as { limit?: number; interval?: string; lookbackDays?: number; minVolumeDaily?: number };
 }
 
 describe('ScreenerPanel', () => {
@@ -214,14 +215,24 @@ describe('ScreenerPanel', () => {
     await waitFor(() => expect(screen.getByTestId('screener-source-badge').textContent).toBe('MOCK'));
   });
 
-  it('renders the top-axis label on its own line beneath the promise bar', async () => {
+  it('Promise cell = 2 rows: bar on top, then "score axis" on the line below', async () => {
     render(<ScreenerPanel agencyId="long-term" onPick={() => {}} />);
     fireEvent.click(screen.getByTestId('screener-run-collapsed'));
     await waitFor(() => expect(screen.getByTestId('screener-topaxis-AAPL')).toBeTruthy());
-    // The top-axis span is a block element beneath the promise line (separate node).
-    const el = screen.getByTestId('screener-topaxis-AAPL');
-    expect(el.textContent).toContain('Technical');
-    expect(el.tagName).toBe('SPAN');
+    // The promise cell holds exactly three nodes in DOM order: bar, value, axis.
+    const cell = screen.getByTestId('screener-promise-AAPL');
+    const bar = cell.querySelector('.screener-promise-bar');
+    const val = cell.querySelector('.screener-promise-val');
+    const axis = cell.querySelector('.screener-topaxis');
+    expect(bar).toBeTruthy();
+    expect(val).toBeTruthy();
+    expect(axis).toBeTruthy();
+    // DOM order: bar -> value -> axis (so CSS lays them as 2 rows, not 3 blocks).
+    expect(cell.children[0]).toBe(bar);
+    expect(cell.children[1]).toBe(val);
+    expect(cell.children[2]).toBe(axis);
+    // Axis label is the agency's top-weighted axis, capitalized (here Technical).
+    expect(axis!.textContent).toContain('Technical');
   });
 
   it('shows a live running timer while screening and a field legend when done', async () => {
@@ -242,6 +253,77 @@ describe('ScreenerPanel', () => {
     const legend = await screen.findByTestId('screener-legend');
     expect(legend.textContent).toContain('Promise');
     expect(legend.textContent).toContain('Verdict');
+  });
+
+  it('Phase 22: renders the agency-default readout (no Timeframe/Instrument selectors)', async () => {
+    render(<ScreenerPanel agencyId="long-term" onPick={() => {}} />);
+    // The old selectors are gone.
+    expect(screen.queryByTestId('screener-timeframe')).toBeNull();
+    expect(screen.queryByTestId('screener-instrument')).toBeNull();
+    // The run instead shows the agency's resolved default (interval · lookback · assetClass).
+    expect(screen.getByTestId('screener-agency-default').textContent).toContain('1d · 90d · EQUITY');
+  });
+
+  it('Phase 22: intraday agency shows its 5m/5d EQUITY default', async () => {
+    render(<ScreenerPanel agencyId="intraday" onPick={() => {}} />);
+    expect(screen.getByTestId('screener-agency-default').textContent).toContain('5m · 5d · EQUITY');
+  });
+
+  it('Phase 22: options agency shows its OPTION asset class default', async () => {
+    render(<ScreenerPanel agencyId="options-swing" onPick={() => {}} />);
+    expect(screen.getByTestId('screener-agency-default').textContent).toContain('1d · 90d · OPTION');
+  });
+
+  it('Phase 22: the readout updates live when the agency switches', async () => {
+    const { rerender } = render(<ScreenerPanel agencyId="long-term" onPick={() => {}} />);
+    expect(screen.getByTestId('screener-agency-default').textContent).toContain('1d · 90d · EQUITY');
+    // Switch to intraday -> readout must reflect the new agency's 5m/5d default.
+    rerender(<ScreenerPanel agencyId="intraday" onPick={() => {}} />);
+    expect(screen.getByTestId('screener-agency-default').textContent).toContain('5m · 5d · EQUITY');
+    // Switch to an options agency -> OPTION asset class.
+    rerender(<ScreenerPanel agencyId="options-intraday" onPick={() => {}} />);
+    expect(screen.getByTestId('screener-agency-default').textContent).toContain('5m · 5d · OPTION');
+  });
+
+  it('Phase 22: sends the agency default profile + asset-class intent (no panel override)', async () => {
+    render(<ScreenerPanel agencyId="long-term" onPick={() => {}} />);
+    fireEvent.click(screen.getByTestId('screener-run-collapsed'));
+    await waitFor(() => expect(screen.getByTestId('screener-table')).toBeTruthy());
+    const args = lastCallArgs() as any;
+    expect(args.interval).toBe('1d');
+    expect(args.lookbackDays).toBe(90);
+    expect(args.instrument).toBe('EQUITY');
+  });
+
+  it('Phase 22: an OPTION agency sends instrument=OPTION and shows the honest badge', async () => {
+    const gs = getScreener as unknown as ReturnType<typeof vi.fn>;
+    const optResult = { ...mockResult, instrument: 'OPTION' as const, note: 'option note' };
+    (gs as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(optResult);
+
+    render(<ScreenerPanel agencyId="options-intraday" onPick={() => {}} />);
+    fireEvent.click(screen.getByTestId('screener-run-collapsed'));
+    await waitFor(() => expect(screen.getByTestId('screener-table')).toBeTruthy());
+    expect((lastCallArgs() as any).instrument).toBe('OPTION');
+    expect(screen.getByTestId('screener-instrument-badge').textContent).toBe('OPTION-LISTED');
+  });
+
+  it('Phase 25: renders the avg-volume column with a human-readable share volume', async () => {
+    render(<ScreenerPanel agencyId="long-term" onPick={() => {}} />);
+    fireEvent.click(screen.getByTestId('screener-run-collapsed'));
+    await waitFor(() => expect(screen.getByTestId('screener-table')).toBeTruthy());
+    // Column header present.
+    expect(screen.getByTestId('screener-col-avgVolume')).toBeTruthy();
+    // Cell renders a formatted volume (9.5M for 9,500,000), not a raw number.
+    const cell = screen.getByTestId('screener-volume-AAPL');
+    expect(cell.textContent).toContain('9.5M');
+  });
+
+  it('Phase 25: sends the default min-volume floor (100000) unless the agency overrides it', async () => {
+    render(<ScreenerPanel agencyId="long-term" onPick={() => {}} />);
+    fireEvent.click(screen.getByTestId('screener-run-collapsed'));
+    await waitFor(() => expect(screen.getByTestId('screener-table')).toBeTruthy());
+    // Default floor is now 100000 (shares/day), not 0.
+    expect((lastCallArgs() as any).minVolumeDaily).toBe(100_000);
   });
 });
 

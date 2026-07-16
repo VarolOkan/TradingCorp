@@ -368,3 +368,71 @@ describe('LlmConfigStore — selection survives restart via SQLite (Phase G)', (
     second['sqlite'].close?.();
   });
 });
+
+describe('LlmConfigStore — partial/corrupt llm-config.json never drops a role (regression)', () => {
+  const fs = require('fs') as typeof import('fs');
+  const os = require('os') as typeof import('os');
+  const pathMod = require('path') as typeof import('path');
+  const { JsonLlmStore } = require('../server/llm-json-store') as typeof import('../server/llm-json-store');
+
+  let jsonFile: string;
+
+  beforeEach(() => {
+    jsonFile = pathMod.join(os.tmpdir(), `llm-config-regress-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  });
+  afterEach(() => {
+    try { fs.rmSync(jsonFile, { force: true }); } catch { /* noop */ }
+  });
+
+  const readDisk = () =>
+    JSON.parse(fs.readFileSync(jsonFile, 'utf8')) as {
+      roles: Record<string, Record<string, { provider: string; model: string }>>;
+      agencyRoles: Record<string, Record<string, string | null>>;
+    };
+
+  it('self-heals a file that is missing a canonical role on load', () => {
+    // Simulate the wiped state a stale build left behind: scanner is GONE.
+    fs.writeFileSync(jsonFile, JSON.stringify({
+      roles: {
+        default: {
+          flexible: { role: 'flexible', provider: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3' },
+          'deep-thought': { role: 'deep-thought', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'tencent/hy3:free' },
+        },
+      },
+      agencyRoles: {},
+    }, null, 2), 'utf8');
+
+    // Booting a store off this file must re-seed scanner from defaults AND
+    // persist it back so it can never stay missing.
+    const store = new LlmConfigStore(defaultLlmConfigs(), undefined, new JsonLlmStore(jsonFile, 'default'), 'default');
+    expect(store.list().map((c) => c.role).sort()).toEqual(['deep-thought', 'flexible', 'scanner']);
+    // The user's real selections are preserved (not overwritten by defaults).
+    expect(store.get('flexible').model).toBe('llama3');
+    expect(store.get('deep-thought').model).toBe('tencent/hy3:free');
+    // The healed scanner comes from the seeded default.
+    expect(store.get('scanner').provider).toBe('openrouter');
+
+    // And it is now durably on disk.
+    const disk = readDisk();
+    expect(Object.keys(disk.roles.default).sort()).toEqual(['deep-thought', 'flexible', 'scanner']);
+  });
+
+  it('put() of one role never drops the other role selections from disk', () => {
+    // Seed all three, restart-style, then update ONLY deep-thought.
+    const seed = new LlmConfigStore(defaultLlmConfigs(), undefined, new JsonLlmStore(jsonFile, 'default'), 'default');
+    seed.put({ role: 'flexible', provider: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3', token: '' });
+    seed.put({ role: 'scanner', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4-8', token: '' });
+
+    // A second process updates deep-thought only.
+    const store = new LlmConfigStore(defaultLlmConfigs(), undefined, new JsonLlmStore(jsonFile, 'default'), 'default');
+    store.put({ role: 'deep-thought', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'tencent/hy3:free', token: '' });
+
+    const disk = readDisk();
+    // All three roles must still be present — the single put must not clobber
+    // flexible/scanner (the exact bug that wiped scanner from llm-config.json).
+    expect(Object.keys(disk.roles.default).sort()).toEqual(['deep-thought', 'flexible', 'scanner']);
+    expect(disk.roles.default.flexible!.model).toBe('llama3');
+    expect(disk.roles.default.scanner!.model).toBe('anthropic/claude-opus-4-8');
+    expect(disk.roles.default['deep-thought']!.model).toBe('tencent/hy3:free');
+  });
+});

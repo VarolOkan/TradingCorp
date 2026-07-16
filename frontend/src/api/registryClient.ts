@@ -21,6 +21,14 @@ export interface AgencySummary {
   name: string;
   horizon: string;
   instrument?: 'EQUITY' | 'OPTION';
+  /** Asset class this agency screens (EQUITY / OPTION / CRYPTO). Phase 22. */
+  assetClass?: 'EQUITY' | 'OPTION' | 'CRYPTO';
+  /** Explicit screener bar interval (Phase 22). */
+  screenerInterval?: '1m' | '5m' | '1h' | '4h' | '1d';
+  /** Explicit screener lookback in days (Phase 22). */
+  screenerLookbackDays?: number;
+  /** Minimum average DAILY bar volume (shares) the agency screens for. Phase 25. */
+  minVolumeDaily?: number;
   /** Ordered analyst ids that make up this agency. */
   analysts?: string[];
   analystCount: number;
@@ -83,10 +91,17 @@ export async function postAgency(
   return (await res.json()) as { ok: boolean; id: string };
 }
 
-/** PUT (edit) an existing agency: membership (+ optional name/horizon). */
+/** PUT (edit) an existing agency: membership + name/horizon + Phase 22
+ *  screener settings (assetClass / screenerInterval / screenerLookbackDays). */
 export async function putAgency(
   agencyId: string,
-  def: Partial<AgencyDef> & { analysts: AgencyAnalystRef[] },
+  def: Partial<AgencyDef> & {
+    analysts: AgencyAnalystRef[];
+    assetClass?: 'EQUITY' | 'OPTION' | 'CRYPTO';
+    screenerInterval?: '1m' | '5m' | '1h' | '4h' | '1d';
+    screenerLookbackDays?: number;
+    minVolumeDaily?: number;
+  },
   userId = 'default',
 ): Promise<{ ok: boolean; id: string; analysts: AgencyAnalystRef[] }> {
   const res = await fetch(

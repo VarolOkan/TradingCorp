@@ -136,6 +136,22 @@ export class LlmConfigStore {
     for (const [key, role] of Object.entries(this.sqlite.getAllAgencyRoles(this.userId))) {
       this.agencyModelRole.set(key, role);
     }
+    // SELF-HEAL: guarantee every canonical role exists in the on-disk selection
+    // store. If a role is absent (e.g. an older build wrote a partial file, or a
+    // stale client POSTed a subset), persist it from the seeded default now.
+    // Without this, a role missing from disk stays missing forever because
+    // put()/flush only writes what the store already knows about — the exact
+    // failure that silently dropped the "scanner" role from llm-config.json.
+    for (const c of this.configs) {
+      if (!this.sqlite.getRoleConfig(this.userId, c.role)) {
+        this.sqlite.upsertRoleConfig(this.userId, {
+          role: c.role,
+          provider: c.provider,
+          baseUrl: c.baseUrl,
+          model: c.model,
+        });
+      }
+    }
   }
 
   private defaultPath(): string {
@@ -159,12 +175,20 @@ export class LlmConfigStore {
     }
     // Selection (provider/baseUrl/model) → plaintext SQLite, survives restart,
     // per user, NOT in the GPG vault. Token → vault (secrets only).
-    this.sqlite.upsertRoleConfig(this.userId, {
-      role: config.role,
-      provider: config.provider,
-      baseUrl: config.baseUrl,
-      model: config.model,
-    });
+    //
+    // Persist ALL roles, not just the one being updated: a single put() must
+    // never be able to drop the other role selections from disk. This makes the
+    // write idempotently complete, so a partial POST body (or a stale client)
+    // cannot silently wipe roles it didn't mention. Combined with the
+    // constructor self-heal, the on-disk file always carries all three roles.
+    for (const c of this.configs) {
+      this.sqlite.upsertRoleConfig(this.userId, {
+        role: c.role,
+        provider: c.provider,
+        baseUrl: c.baseUrl,
+        model: c.model,
+      });
+    }
     this.vault.setLlm(config.role, { ...config });
     this.vault.save();
   }

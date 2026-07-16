@@ -34,10 +34,22 @@ export interface AgencySummary {
   name: string;
   horizon: string;
   instrument?: 'EQUITY' | 'OPTION';
+  /** Asset class this agency screens (EQUITY / OPTION / CRYPTO). Phase 22. */
+  assetClass?: 'EQUITY' | 'OPTION' | 'CRYPTO';
+  /** Explicit screener bar interval (Phase 22). */
+  screenerInterval?: '1m' | '5m' | '1h' | '4h' | '1d';
+  /** Explicit screener lookback in days (Phase 22). */
+  screenerLookbackDays?: number;
+  /** Minimum average DAILY bar volume (shares) the agency screens for. Phase 25. */
+  minVolumeDaily?: number;
   /** Ordered analyst ids that make up this agency. */
   analysts?: string[];
   analystCount: number;
   isDefault: boolean;
+  /** True when the agency is gated off by default (e.g. crypto-screener until
+   *  real crypto sources land). Present in the payload so the UI can decide;
+   *  the /registry list already omits these unless env ENABLE_CRYPTO_AGENCY=true. */
+  hidden?: boolean;
 }
 
 function resolveUserId(req: Express.Request): string {
@@ -76,6 +88,11 @@ function summarize(agency: AgencyDef, isDefault: boolean): AgencySummary {
     analystCount: agency.analysts.length, isDefault,
   };
   if (agency.instrument) out.instrument = agency.instrument;
+  if (agency.assetClass) out.assetClass = agency.assetClass;
+  if (agency.screenerInterval) out.screenerInterval = agency.screenerInterval;
+  if (agency.screenerLookbackDays != null) out.screenerLookbackDays = agency.screenerLookbackDays;
+  if (agency.minVolumeDaily != null) out.minVolumeDaily = agency.minVolumeDaily;
+  if (agency.hidden) out.hidden = true;
   return out;
 }
 
@@ -109,9 +126,14 @@ export function registerRegistryRoutes(
       const catalog: Array<AnalystDef & { custom: boolean }> = Object.values(ANALYST_DEFS).map(
         (a) => ({ ...a, custom: !COMPILED_ANALYST_DEFS[a.id] }),
       );
-      const agencies: AgencySummary[] = Object.values(AGENCIES).map((a) =>
-        summarize(a, a.default === true),
-      );
+      // Agencies flagged `hidden` (e.g. crypto-screener until its universe /
+      // on-chain sources exist) are omitted from the selectable list unless
+      // explicitly enabled via ENABLE_CRYPTO_AGENCY=true. They remain defined
+      // in AGENCIES and fully usable by id, so all hooks/tests stay intact.
+      const enableCrypto = process.env.ENABLE_CRYPTO_AGENCY === 'true';
+      const agencies: AgencySummary[] = Object.values(AGENCIES)
+        .filter((a) => !a.hidden || enableCrypto)
+        .map((a) => summarize(a, a.default === true));
       res.json({ catalog, agencies, driver: store.driver });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -127,6 +149,10 @@ export function registerRegistryRoutes(
       analysts?: AgencyAnalystRef[];
       name?: string;
       horizon?: string;
+      assetClass?: 'EQUITY' | 'OPTION' | 'CRYPTO';
+      screenerInterval?: '1m' | '5m' | '1h' | '4h' | '1d';
+      screenerLookbackDays?: number;
+      minVolumeDaily?: number;
       feedInto?: Record<string, string[]>;
     };
 
@@ -169,6 +195,12 @@ export function registerRegistryRoutes(
       description: base.description ?? '',
       horizon: (body.horizon as AnalysisHorizon) || base.horizon,
       analysts: body.analysts,
+      // Phase 22: persist the agency-level screener settings when provided.
+      assetClass: body.assetClass ?? base.assetClass,
+      instrument: base.instrument,
+      screenerInterval: body.screenerInterval ?? base.screenerInterval,
+      screenerLookbackDays: body.screenerLookbackDays ?? base.screenerLookbackDays,
+      minVolumeDaily: body.minVolumeDaily ?? base.minVolumeDaily,
     };
     store.setAgencyDef(userId, updated);
     // Keep the membership bucket in sync with the saved flow. The boot-merge

@@ -1,6 +1,7 @@
 // src/tests/screener.test.ts
 // Phase 6: the screener is fast, deterministic, and agency-aware.
-import { screenTickers, resolveAgencyWeights, resolveScreenerProfile, technicalPromiseScore, stabilityScore, DEFAULT_UNIVERSE } from '../registry/logic/screener';
+import { screenTickers, resolveAgencyWeights, resolveScreenerProfile, resolveScreenerInstrument, technicalPromiseScore, stabilityScore, DEFAULT_UNIVERSE } from '../registry/logic/screener';
+import { AGENCIES } from '../registry/agencies';
 import type { PriceBarsFetchFn } from '../registry/logic/hist';
 import type { NewsFetchFn } from '../registry/logic/news';
 
@@ -99,14 +100,47 @@ describe('screener — agency weights', () => {
 
 describe('screener — horizon profile', () => {
   it('intraday agencies screen on short 5m / 5d bars', () => {
-    expect(resolveScreenerProfile('intraday')).toEqual({ interval: '5m', lookbackDays: 5 });
-    expect(resolveScreenerProfile('options-intraday')).toEqual({ interval: '5m', lookbackDays: 5 });
+    expect(resolveScreenerProfile('intraday')).toEqual({ interval: '5m', lookbackDays: 5, minVolumeDaily: 100_000 });
+    expect(resolveScreenerProfile('options-intraday')).toEqual({ interval: '5m', lookbackDays: 5, minVolumeDaily: 100_000 });
   });
 
-  it('non-intraday agencies screen on daily 1d / 90d bars', () => {
-    expect(resolveScreenerProfile('long-term')).toEqual({ interval: '1d', lookbackDays: 90 });
-    expect(resolveScreenerProfile('medium-term')).toEqual({ interval: '1d', lookbackDays: 90 });
-    expect(resolveScreenerProfile('crypto-screener')).toEqual({ interval: '1d', lookbackDays: 90 });
+  it('non-intraday agencies screen on daily 1d / 90d bars (medium-term → 4h / 45d)', () => {
+    expect(resolveScreenerProfile('long-term', AGENCIES['long-term'])).toEqual({ interval: '1d', lookbackDays: 90, minVolumeDaily: 100_000 });
+    // Phase 25: medium-term SEED defaults to 4h / 45d (was 1d / 90d). The route
+    // always passes the agency def, so resolveScreenerProfile reads it from there.
+    expect(resolveScreenerProfile('medium-term', AGENCIES['medium-term'])).toEqual({ interval: '4h', lookbackDays: 45, minVolumeDaily: 100_000 });
+    expect(resolveScreenerProfile('crypto-screener', AGENCIES['crypto-screener'])).toEqual({ interval: '1d', lookbackDays: 90, minVolumeDaily: 100_000 });
+  });
+
+  describe('screener — Phase 22 agency-level defaults override', () => {
+    it('explicit screenerInterval/screenerLookbackDays on the agency def win over the implicit rule', () => {
+      // An intraday agency that the user retuned to a slower horizon.
+      expect(
+        resolveScreenerProfile('intraday', { screenerInterval: '1d', screenerLookbackDays: 30 }),
+      ).toEqual({ interval: '1d', lookbackDays: 30, minVolumeDaily: 100_000 });
+    });
+
+    it('a non-intraday agency with explicit 5m/5d screens intraday bars', () => {
+      expect(
+        resolveScreenerProfile('long-term', { screenerInterval: '5m', screenerLookbackDays: 5 }),
+      ).toEqual({ interval: '5m', lookbackDays: 5, minVolumeDaily: 100_000 });
+    });
+
+    it('carries a per-agency minVolumeDaily floor through the profile', () => {
+      expect(
+        resolveScreenerProfile('long-term', { screenerInterval: '1d', screenerLookbackDays: 90, minVolumeDaily: 5_000_000 }),
+      ).toEqual({ interval: '1d', lookbackDays: 90, minVolumeDaily: 5_000_000 });
+    });
+
+    it('resolveScreenerInstrument: OPTION assetClass ⇒ OPTION; EQUITY/CRYPTO ⇒ EQUITY', () => {
+      expect(resolveScreenerInstrument({ assetClass: 'OPTION' })).toBe('OPTION');
+      expect(resolveScreenerInstrument({ assetClass: 'EQUITY' })).toBe('EQUITY');
+      // CRYPTO today screens equity underlyings (crypto universe source is TBD).
+      expect(resolveScreenerInstrument({ assetClass: 'CRYPTO' })).toBe('EQUITY');
+      // legacy `instrument` alias still honored.
+      expect(resolveScreenerInstrument({ instrument: 'OPTION' })).toBe('OPTION');
+      expect(resolveScreenerInstrument(undefined)).toBe('EQUITY');
+    });
   });
 
   it('screenTickers honors the per-agency horizon (intraday uses 5m/5d, long-term uses 1d/90d)', async () => {
@@ -246,5 +280,104 @@ describe('screener — screenTickers', () => {
     expect(firstLetters.size).toBeGreaterThan(18); // not just 'A'
     expect(firstLetters.has('A')).toBe(true);
     expect(firstLetters.has('Z')).toBe(true);
+  });
+
+  describe('screener — Phase 25 volume (avgVolume column + min-volume floor)', () => {
+    // Custom price source: each ticker gets a distinct avg volume so the floor
+    // is observable. Volume values are the bars' volume field (mean across bars).
+    const volByTicker: Record<string, number> = { BIG: 9_000_000, MID: 2_000_000, TINY: 50_000 };
+    const volPriceFetch: PriceBarsFetchFn = async (url: string) => {
+      // fetchPriceBars builds `…/chart/<SYMBOL>` (path param), so pull it from
+      // the trailing path segment, not a query string.
+      const m = String(url).match(/\/chart\/([A-Z.]+)/i) ?? String(url).match(/symbol=([A-Z.]+)/i);
+      const sym = (m?.[1] ?? 'AAPL').toUpperCase();
+      const v = volByTicker[sym] ?? 1_000_000;
+      const closes = [100, 102, 101, 103, 102, 104, 103, 105];
+      return {
+        ok: true,
+        json: async () => ({
+          chart: {
+            result: [
+              {
+                timestamp: closes.map((_, i) => i),
+                indicators: {
+                  quote: [{
+                    open: closes, high: closes.map((c) => c + 1), low: closes.map((c) => c - 1),
+                    close: closes, volume: closes.map(() => v),
+                  }],
+                },
+              },
+            ],
+          },
+        }),
+      } as any;
+    };
+
+    it('every row reports avgVolume (mean of bar volume)', async () => {
+      const res = await screenTickers('long-term', {
+        universe: ['BIG', 'MID', 'TINY'],
+        fetchFn: volPriceFetch,
+        newsFetchFn: newsFetch,
+      });
+      expect(res.rows).toHaveLength(3);
+      expect(res.rows.find((r) => r.ticker === 'BIG')!.avgVolume).toBe(9_000_000);
+      expect(res.rows.find((r) => r.ticker === 'TINY')!.avgVolume).toBe(50_000);
+    });
+
+    it('minVolumeDaily=0 leaves every row (default, no floor)', async () => {
+      const res = await screenTickers('long-term', {
+        universe: ['BIG', 'MID', 'TINY'],
+        minVolumeDaily: 0,
+        fetchFn: volPriceFetch,
+        newsFetchFn: newsFetch,
+      });
+      expect(res.rows).toHaveLength(3);
+      expect(res.minVolumeDropped).toBe(0);
+    });
+
+    it('minVolumeDaily floor drops rows below the threshold (row-level gate)', async () => {
+      const res = await screenTickers('long-term', {
+        universe: ['BIG', 'MID', 'TINY'],
+        minVolumeDaily: 1_000_000,
+        limit: 10,
+        fetchFn: volPriceFetch,
+        newsFetchFn: newsFetch,
+      });
+      // BIG (9M) and MID (2M) pass; TINY (50k) is dropped.
+      expect(res.rows.map((r) => r.ticker).sort()).toEqual(['BIG', 'MID']);
+      expect(res.minVolumeDropped).toBe(1);
+    });
+
+    it('a high floor can empty the result without erroring', async () => {
+      const res = await screenTickers('long-term', {
+        universe: ['BIG', 'MID', 'TINY'],
+        minVolumeDaily: 20_000_000,
+        limit: 10,
+        fetchFn: volPriceFetch,
+        newsFetchFn: newsFetch,
+      });
+      expect(res.rows).toHaveLength(0);
+      expect(res.minVolumeDropped).toBe(3);
+    });
+
+    it('REGRESSION: a non-zero floor does NOT wipe the universe when quote ADV is missing (defers to row gate)', async () => {
+      // In a live env the quote endpoint can be blocked/rate-limited, so
+      // getUniverse returns the LIVE pool as unpriced quotes with NO
+      // averageDailyVolume3Month. The pre-filter must keep those tickers and
+      // let the row-level avgVolume gate decide — otherwise any non-zero floor
+      // would return 0 rows (the reported bug: min=100000 -> 0, min=0 -> rows).
+      const res = await screenTickers('long-term', {
+        // Explicit universe but NO universeQuotes -> pre-filter sees missing ADV
+        // for every ticker and must NOT drop them.
+        universe: ['BIG', 'MID', 'TINY'],
+        minVolumeDaily: 100_000,
+        limit: 10,
+        fetchFn: volPriceFetch,
+        newsFetchFn: newsFetch,
+      });
+      // Row gate keeps BIG (9M) + MID (2M); TINY (50k) dropped by row gate.
+      expect(res.rows.map((r) => r.ticker).sort()).toEqual(['BIG', 'MID']);
+      expect(res.minVolumeDropped).toBe(1);
+    });
   });
 });
