@@ -1,6 +1,6 @@
 // src/tests/screener.test.ts
 // Phase 6: the screener is fast, deterministic, and agency-aware.
-import { screenTickers, resolveAgencyWeights, resolveScreenerProfile, technicalPromiseScore, DEFAULT_UNIVERSE } from '../registry/logic/screener';
+import { screenTickers, resolveAgencyWeights, resolveScreenerProfile, technicalPromiseScore, stabilityScore, DEFAULT_UNIVERSE } from '../registry/logic/screener';
 import type { PriceBarsFetchFn } from '../registry/logic/hist';
 import type { NewsFetchFn } from '../registry/logic/news';
 
@@ -44,19 +44,32 @@ const priceFetch: PriceBarsFetchFn = async (url: string) => {
   } as any;
 };
 
+// The screener runs the KEYLESS path in production (no FINNHUB_KEY), so
+// fetchCompanyNews routes to the Yahoo RSS feed (the same feed the live News
+// tab uses). Model that here: return Yahoo-RSS-shaped XML per ticker so the
+// sentiment axis is populated deterministically and agency weighting-by-
+// sentiment actually differentiates (crypto penalizes bearish TSLA harder).
 const newsFetch: NewsFetchFn = async (url: string) => {
-  const m = String(url).match(/symbol=([A-Z.]+)/i);
+  const m = String(url).match(/symbols=([A-Z.]+)/i) ?? String(url).match(/symbol=([A-Z.]+)/i);
   const sym = (m?.[1] ?? 'AAPL').toUpperCase();
   // AAPL/MSFT get bullish headlines; TSLA gets bearish; others neutral.
   const bullish = sym === 'AAPL' || sym === 'MSFT';
   const bearish = sym === 'TSLA';
-  const articles = bullish
-    ? [{ headline: `${sym} beats earnings, raises guidance`, url: 'u1', datetime: 1, summary: '' }, { headline: `${sym} upgraded to buy on strong demand`, url: 'u2', datetime: 2, summary: '' }]
+  const titles = bullish
+    ? [`${sym} beats earnings, raises guidance`, `${sym} upgraded to buy on strong demand`]
     : bearish
-      ? [{ headline: `${sym} plunges as regulator opens investigation`, url: 'u3', datetime: 3, summary: '' }, { headline: `${sym} misses estimates`, url: 'u4', datetime: 4, summary: '' }]
-      : [{ headline: `${sym} trades flat ahead of data`, url: 'u5', datetime: 5, summary: '' }];
-  // Finnhub /company-news returns `results: [{ headline, ... }]`.
-  return { ok: true, json: async () => ({ results: articles }) } as any;
+      ? [`${sym} plunges as regulator opens investigation`, `${sym} misses estimates`]
+      : [`${sym} trades flat ahead of data`];
+  const items = titles
+    .map(
+      (t, i) =>
+        `<item><title>${t}</title><link>https://finance.yahoo.com/news/${sym}-${i}.html</link><pubDate>Mon, 15 Jun 2026 10:00:00 GMT</pubDate></item>`,
+    )
+    .join('');
+  const xml = `<rss><channel>${items}</channel></rss>`;
+  // Yahoo RSS comes back as text(); also provide json() so the Finnhub branch
+  // (when a key is present) doesn't crash.
+  return { ok: true, text: async () => xml, json: async () => ({}) } as any;
 };
 
 describe('screener — agency weights', () => {
@@ -130,13 +143,20 @@ describe('screener — horizon profile', () => {
 });
 
 describe('screener — technical heuristic', () => {
-  it('scores an uptrend with calm vol higher than a choppy one', () => {
-    const calm = technicalPromiseScore([100, 105, 103, 108, 106, 112, 110, 115]);
-    const choppy = technicalPromiseScore([300, 280, 310, 270, 320, 260, 330, 250]);
+  it('rewards uptrends over downtrends and calm vol over choppy', () => {
+    // An uptrend should clearly outscore a same-volatility downtrend (trend +
+    // momentum components), and a calm low-vol series should outscore a choppy
+    // one on the volatility-quality axis. These are the real signals the
+    // heuristic extracts from price bars.
+    const uptrend = technicalPromiseScore(Array.from({ length: 60 }, (_, i) => 100 + i * 1.5));
+    const downtrend = technicalPromiseScore(Array.from({ length: 60 }, (_, i) => 200 - i * 1.5));
+    expect(uptrend).toBeGreaterThan(downtrend);
+
+    const calm = stabilityScore(Array.from({ length: 60 }, (_, i) => 100 + i * 1.5));
+    const choppy = stabilityScore([300, 280, 310, 270, 320, 260, 330, 250]);
     expect(calm).toBeGreaterThan(choppy);
-    // calm uptrend scores high (well above the choppy one); assert a clearly
-    // true lower bound rather than the fragile exact value.
-    expect(calm).toBeGreaterThan(70);
+    // a calm uptrend is a high-quality (well above mid) technical read
+    expect(uptrend).toBeGreaterThan(70);
   });
 });
 
