@@ -1,5 +1,5 @@
 // frontend/src/components/analysts/analystConfigSchema.ts
-// Frontend mirror of the backend per-card Settings schema (docs/CARD_SETTINGS_PANEL.md).
+// Frontend mirror of the backend per-card Settings schema (docs/EXTENDING_ANALYSTS.md).
 //
 // Declares which analysts expose tunable WEIGHTS and which expose credentialed
 // SOURCES (driven by the GET /analyst-config catalog). The Settings dialog

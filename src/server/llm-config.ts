@@ -1,5 +1,5 @@
 // src/server/llm-config.ts
-// Phase G — LLM provider/model configuration (docs/OPTIONS_AND_AGENCY_EXPANSION.md §12).
+// Phase G — LLM provider/model configuration (docs/EXTENDING_ANALYSTS.md §8).
 //
 // Three preconfigured model ROLES ship empty-token:
 //   deep-thought | scanner | flexible

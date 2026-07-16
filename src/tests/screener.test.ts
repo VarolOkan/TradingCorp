@@ -225,4 +225,26 @@ describe('screener — screenTickers', () => {
   it('DEFAULT_UNIVERSE is a sensible size', () => {
     expect(DEFAULT_UNIVERSE.length).toBeGreaterThanOrEqual(20);
   });
+
+  it('large alphabetical universe is de-biased before the cap (not all A-tickers)', async () => {
+    // Reproduces the reported bug: when the quote pre-filter is unavailable the
+    // live universe returns in alphabetical order; a naive slice(0, N) would
+    // screen only A… symbols. The screener must spread the cap across the whole
+    // universe so intraday/long-term screens see a representative set.
+    const big: string[] = [];
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    for (const L of letters) for (let i = 0; i < 20; i++) big.push(`${L}${i}`.padEnd(4, 'X'));
+    const res = await screenTickers('intraday', {
+      universe: big,
+      limit: 50,
+      maxScreenUniverse: 400,
+      fetchFn: priceFetch,
+      newsFetchFn: newsFetch,
+    });
+    // Cap is 400 across 520 symbols -> ~77% of the alphabet must be represented.
+    const firstLetters = new Set(res.rows.map((r) => r.ticker[0]!));
+    expect(firstLetters.size).toBeGreaterThan(18); // not just 'A'
+    expect(firstLetters.has('A')).toBe(true);
+    expect(firstLetters.has('Z')).toBe(true);
+  });
 });

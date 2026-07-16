@@ -451,12 +451,14 @@ npm run test:ui     # frontend vitest suite + coverage report
 
 ## Documentation index
 
-- [`docs/README.md`](docs/README.md) — project overview
-- [`docs/PHASED_DEVELOPMENT.md`](docs/PHASED_DEVELOPMENT.md) — TradingAgents lineage, stage rules, phased test-gated plan
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — LangGraph DAG, Socket.IO + SPA flow, stage rules
+- [`docs/README.md`](docs/README.md) — project overview + documentation map
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — LangGraph DAG, Socket.IO + SPA flow, node responsibilities
+- [`docs/EXTENDING_ANALYSTS.md`](docs/EXTENDING_ANALYSTS.md) — add an analyst/agency (declarative + fn + options paths)
+- [`docs/SCREENER_STANDARDS.md`](docs/SCREENER_STANDARDS.md) — Stock Screener selection standards & traceability (how/why it picks tickers)
 - [`docs/SETUP.md`](docs/SETUP.md) — install, env table, run scripts
 - [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) — limitations & workarounds
-- **Live REST API docs** — served by the running server at **`/api-docs`** (Swagger UI v5, dark mode). The OpenAPI 3.0 document lives at [`docs/openapi.json`](docs/openapi.json) and is kept in sync with the route handlers. Covers all REST endpoints including `GET /news` (item 4) and `GET /screener` (item 6); the Watchlist / Portfolio layer (item 7) is frontend-only (`localStorage`), so it has no backend endpoint.
+- [`docs/archive/`](docs/archive/) — superseded design docs (historical, kept for traceability)
+- **Live REST API docs** — served by the running server at **`/api-docs`** (Swagger UI v5, dark mode). The OpenAPI 3.0 document lives at [`docs/openapi.json`](docs/openapi.json) and is kept in sync with the route handlers. Covers all REST endpoints including `GET /news`, `GET /screener`, and the analyst/agency CRUD endpoints; the Watchlist / Portfolio layer is frontend-only (`localStorage`), so it has no backend endpoint.
 
 ---
 

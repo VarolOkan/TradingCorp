@@ -1,6 +1,6 @@
 // src/types/registry.ts
 // TypeScript types for the declarative analyst and agency registry.
-// These are the "schema" documented in docs/AGENCY-REARCHITECTURE.md §4.
+// These are the "schema" documented in docs/EXTENDING_ANALYSTS.md (analyst/agency defs).
 // They complement (but do not replace) the runtime types in financial-analysis.ts.
 
 // ---- Analyst kind ----

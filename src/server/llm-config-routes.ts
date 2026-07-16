@@ -1,5 +1,5 @@
 // src/server/llm-config-routes.ts
-// Phase G — REST for the LLM provider/model config (docs/OPTIONS_AND_AGENCY_EXPANSION.md §12).
+// Phase G — REST for the LLM provider/model config (docs/EXTENDING_ANALYSTS.md §8).
 //
 // GET  /llm-config            → public configs (token → hasToken) + per-agency role
 // GET  /llm-config/status     → which roles are live (configured:bool)

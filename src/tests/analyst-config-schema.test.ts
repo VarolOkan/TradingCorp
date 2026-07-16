@@ -1,5 +1,5 @@
 // src/tests/analyst-config-schema.test.ts
-// Phase 1 (docs/CARD_SETTINGS_PANEL.md): schema-driven per-card settings.
+// Phase 1 (docs/EXTENDING_ANALYSTS.md): schema-driven per-card settings.
 //
 // Asserts the descriptor shows ONLY the items an analyst can actually adjust:
 //   - tunable WEIGHTS (handler-consumed params) for technical & risk

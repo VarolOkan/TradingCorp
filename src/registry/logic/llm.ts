@@ -1,6 +1,6 @@
 // src/registry/logic/llm.ts
 // Phase F/G — provider-agnostic LLM call for the analyst "LLM does the work" step
-// (docs/OPTIONS_AND_AGENCY_EXPANSION.md §10.3, §12).
+// (docs/EXTENDING_ANALYSTS.md §8 — options flavors + LLM step).
 //
 // The client is OpenAI-compatible chat completions. The provider/baseUrl/model/token
 // are resolved from the LlmConfigStore by ROLE (deep-thought | scanner | flexible)

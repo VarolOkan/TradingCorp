@@ -1,5 +1,5 @@
 // src/server/analyst-params-routes.ts
-// REST surface for per-analyst tunable WEIGHTS (docs/CARD_SETTINGS_PANEL.md).
+// REST surface for per-analyst tunable WEIGHTS (docs/EXTENDING_ANALYSTS.md).
 //
 // POST /analyst-params  — save a weight override set for (session, agency, analyst).
 // GET  /analyst-params  — return the saved weights for a whole agency (so the

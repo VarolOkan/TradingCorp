@@ -1,5 +1,5 @@
 // src/registry/analyst-config-schema.ts
-// Schema-driven descriptor for the per-card Settings panel (docs/CARD_SETTINGS_PANEL.md).
+// Schema-driven descriptor for the per-card Settings panel (docs/EXTENDING_ANALYSTS.md).
 //
 // The panel shows ONLY the items an analyst can actually adjust:
 //   - tunable WEIGHTS: the per-analyst `params` the handlers actually read

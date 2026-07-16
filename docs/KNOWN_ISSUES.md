@@ -106,7 +106,7 @@ differed only by dropdown label + wall card count; the streamed scores/verdicts
 were byte-identical because the mock handlers seeded purely from the ticker and
 never read `params`/`horizon`.
 
-**Resolved (see `docs/HISTORY.md`):** an `AnalystTuning`
+**Resolved (see the root `README.md` phased table, Phase 8):** an `AnalystTuning`
 `{ horizon, params }` carrier is threaded `AgencyGraph → GenericAnalystNode →
 handler`. Handlers bias output by horizon/params: technical score runs hotter for
 intraday; sentiment amplifies social volume for intraday; risk clamps stop-loss
@@ -125,7 +125,7 @@ avoid perturbing every handler's output.
 
 ## 9. Card-level Settings Panel + unified tabbed gear — SHIPPED
 
-Per-analyst settings are implemented (docs/CARD_SETTINGS_PANEL.md) across Phases
+Per-analyst settings are implemented (docs/EXTENDING_ANALYSTS.md) across Phases
 1–4 and fully test-gated. A user can click ONE gear on an analyst card and adjust
 only what that analyst actually supports:
 
@@ -183,7 +183,7 @@ historical-data work).
 
 Two new option-trading agencies (`options-swing`, `options-intraday`) and a
 deterministic options data layer are implemented (see
-`docs/OPTIONS_AND_AGENCY_EXPANSION.md` and `ARCHITECTURE.md › Options agencies &
+`docs/EXTENDING_ANALYSTS.md` and `ARCHITECTURE.md › Options agencies &
 data layer`). All tests are green (jest + vitest) and a live `request_analysis`
 with `agencyId:'options-intraday'` / `'options-swing'` returns a populated
 `final_decision` + per-analyst option traces.
@@ -258,7 +258,7 @@ To enable live options: set `POLYGON_API_KEY` in the server environment (e.g.
 
 ### 11.1 Raw per-analyst data dump ships as `report-<id>.json`
 A new export sibling persists **all raw collected data** with a per-analyst
-annotation, for traceability and a future UI re-view (see `docs/HISTORY.md`).
+annotation, for traceability and a future UI re-view (see the root `README.md` phased table, Phase 11.1).
 Equity runs dump `state.ingested` (bars/market/fundamental/sentiment); options
 runs dump `state.optionsData` (underlying bars + option_chain + Black–Scholes
 greeks). Each consuming analyst records a `dataReceived` entry

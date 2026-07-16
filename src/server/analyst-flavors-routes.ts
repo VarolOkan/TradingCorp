@@ -1,5 +1,5 @@
 // src/server/analyst-flavors-routes.ts
-// REST surface for per-analyst FLAVORS (docs/OPTIONS_AND_AGENCY_EXPANSION.md §10.5).
+// REST surface for per-analyst FLAVORS (docs/EXTENDING_ANALYSTS.md §8).
 //
 // GET  /analyst-flavors?sessionId=&agencyId=&analystId=
 //      → { flavors: AnalystFlavor[], selectedId } (resolved shipped set overlaid

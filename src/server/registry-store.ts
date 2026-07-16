@@ -3,7 +3,7 @@
 // agency CRUD. One of two backends is selected at runtime via the env var
 // REGISTRY_STORE_DRIVER:
 //
-//   REGISTRY_STORE_DRIVER=json    -> RegistryJsonStore
+//   REGISTRY_STORE_DRIVER=json    -> RegistryJsonStore   [DEFAULT]
 //                                 (per-user JSON file .data/registry-<userId>.json,
 //                                  ZERO native deps — runs anywhere, incl. the
 //                                  sandbox where better-sqlite3 ABI-crashes)
@@ -11,8 +11,8 @@
 //                                 (per-user sqlite table registry_overrides,
 //                                  the user's preferred backend; needs a working
 //                                  better-sqlite3 native build)
-//   (unset -> defaults to 'sqlite' per the user's lean; set to 'json' in
-//    environments where the native module cannot load)
+//   (unset -> defaults to 'json' so a better-sqlite3 ABI rebuild can never
+//    silently flip persistence to a different backend and drop user config)
 //
 // Both backends implement the SAME RegistryStore interface and persist these
 // four override kinds per user:
@@ -328,8 +328,12 @@ export class RegistrySqliteStore implements RegistryStore {
 export type RegistryDriverName = 'json' | 'sqlite';
 
 export function resolveDriverName(): RegistryDriverName {
-  const v = (process.env.REGISTRY_STORE_DRIVER || 'sqlite').toLowerCase().trim();
-  return v === 'json' ? 'json' : 'sqlite';
+  // Default to the zero-native-dependency JSON store so a better-sqlite3 ABI
+  // rebuild (e.g. via `npm run build`) can NEVER silently flip persistence to a
+  // different backend and drop user config. Opt into SQLite with
+  // REGISTRY_STORE_DRIVER=sqlite (requires a working native build).
+  const v = (process.env.REGISTRY_STORE_DRIVER || 'json').toLowerCase().trim();
+  return v === 'sqlite' ? 'sqlite' : 'json';
 }
 
 /**

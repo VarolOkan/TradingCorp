@@ -342,6 +342,28 @@ export function resolveScreenerProfile(agencyId: string): ScreenerProfile {
   return { interval: '1d', lookbackDays: 90 };
 }
 
+// Deterministic, seedable shuffle (mulberry32 + Fisher-Yates) so the screener
+// can de-bias a large universe before capping it, WITHOUT making results
+// non-reproducible across runs (tests assert on these). Seeding by a fixed
+// constant keeps the screen stable for a given universe.
+function seededShuffle<T>(items: T[], seed = 0x9e3779b9): T[] {
+  let s = seed >>> 0;
+  const rand = () => {
+    // mulberry32
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
+
 export async function screenTickers(agencyId: string, options: ScreenerOptions = {}): Promise<ScreenerResult> {
   let universeTrace: UniverseTrace | undefined;
   let universe: string[];
@@ -361,7 +383,12 @@ export async function screenTickers(agencyId: string, options: ScreenerOptions =
   // per-ticker bar/news calls). Priced pre-filtered pools are already small.
   const maxScreen = options.maxScreenUniverse ?? 400;
   if (universe.length > maxScreen) {
-    universe = universe.slice(0, maxScreen);
+    // De-bias before capping. The raw universe (e.g. nasdaqtrader) is returned
+    // alphabetically; a naive slice(0, N) would always screen the A… tickers
+    // and never reach the rest of the alphabet. A deterministic (seeded) shuffle
+    // spreads the cap across the whole universe so the screen isn't biased by
+    // symbol spelling, while staying reproducible for a given universe.
+    universe = seededShuffle(universe).slice(0, maxScreen);
   }
   // Honor an explicit interval/lookback if the caller passed one (tests, or a
   // future UI control); otherwise derive it from the agency's horizon so

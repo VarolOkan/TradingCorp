@@ -1,5 +1,5 @@
 // src/tests/llm-config.test.ts
-// Phase G — LLM provider/model configuration (docs/OPTIONS_AND_AGENCY_EXPANSION.md §12).
+// Phase G — LLM provider/model configuration (docs/EXTENDING_ANALYSTS.md §8).
 import { describe, it, expect } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';

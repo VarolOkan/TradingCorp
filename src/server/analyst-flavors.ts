@@ -1,5 +1,5 @@
 // src/server/analyst-flavors.ts
-// Per-analyst FLAVOR store (docs/OPTIONS_AND_AGENCY_EXPANSION.md §10 — the
+// Per-analyst FLAVOR store (docs/EXTENDING_ANALYSTS.md §8 — the options flavor steps).
 // "multi-flavor Role & Instructions" capability).
 //
 // A flavor is a named Role & Instructions bundle for an analyst. The shipped

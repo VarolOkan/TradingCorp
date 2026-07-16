@@ -5,7 +5,7 @@ implemented with LangGraph's `StateGraph`. The shared state object
 (`AgentState`, see `src/types/financial-analysis.ts`) is threaded through every
 node; each node reads what it needs and returns an updated copy. The backend
 graph is adapted from the open-source **TradingAgents** reference design — see
-[PHASED_DEVELOPMENT.md](./PHASED_DEVELOPMENT.md) for the layer mapping and the
+[ARCHITECTURE.md](./ARCHITECTURE.md) (this file) and the root `README.md` for the layer mapping and the
 rules that apply at each stage.
 
 ## Graph topology
@@ -189,7 +189,7 @@ All handlers share one `NodeSurface` implementation (`makeNodeSurface()` in
 ### Stage rules (summary)
 
 The full rule set is in
-[PHASED_DEVELOPMENT.md §2](./PHASED_DEVELOPMENT.md#2-stage-rules-as-described-in-the-initial-design).
+[root `README.md` phased plan, Phase 2](./README.md#frontend-rewrite--phased-plan) for the stage rules.
 In brief:
 
 - **Stage 1 (gathering):** Bull/Bear balance, neutral synthesis, separate
@@ -339,11 +339,11 @@ Backend: each analyst handler calls `captureTrace(state, trace)` (the
 `analystTraces` channel is declared on the LangGraph `AgentState` so it survives
 the run, and `normalizeResult` ships it on `analysis_complete`.
 
-See [PHASED_DEVELOPMENT.md](./PHASED_DEVELOPMENT.md) for the schedule.
+See the root `README.md` [phased plan](./README.md#frontend-rewrite--phased-plan) for the schedule.
 
 ## Options agencies & data layer
 
-The options expansion (see `docs/OPTIONS_AND_AGENCY_EXPANSION.md`) adds a
+The options agencies (see `docs/EXTENDING_ANALYSTS.md §8` and the design in `docs/archive/OPTIONS_AND_AGENCY_EXPANSION.md`) add a
 **deterministic options data layer** (no external market API) plus two new
 `AgencyDef`s that trade `instrument: 'OPTION'`. All randomness is seeded from
 the ticker string (`stringToSeed` + `seededRandom`), so a given
@@ -475,7 +475,7 @@ reports/
 ```
 
 A fourth sibling — **`report-<id>.json`** — is the **raw-data dump**
-(`docs/HISTORY.md`): it persists all data collected by the ingestion
+(the root `README.md` phased table, Phase 11.1): it persists all data collected by the ingestion
 analysts (`state.ingested` for equity, `state.optionsData` for options) plus a
 per-analyst `dataReceived` annotation (which ticker/domain/interval/source/asOf
 each analyst consumed). It enables traceability and a future per-analyst UI

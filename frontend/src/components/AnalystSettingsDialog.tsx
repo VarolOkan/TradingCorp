@@ -1,5 +1,5 @@
 // frontend/src/components/AnalystSettingsDialog.tsx
-// Per-card Settings panel (docs/CARD_SETTINGS_PANEL.md).
+// Per-card Settings panel (docs/EXTENDING_ANALYSTS.md).
 //
 // Shown when the user clicks the gear on an analyst card. Renders ONLY the
 // items that analyst can actually adjust (from its AnalystConfigSchema):

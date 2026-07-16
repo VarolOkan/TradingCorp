@@ -1,5 +1,5 @@
 // src/tests/analyst-params.test.ts
-// Phase 2 (docs/CARD_SETTINGS_PANEL.md): backend weights store + routes + merge.
+// Phase 2 (docs/EXTENDING_ANALYSTS.md): backend weights store + routes + merge.
 //
 // Verifies:
 //   - AnalystParamsStore validate/set/get/clear + allow-list enforcement

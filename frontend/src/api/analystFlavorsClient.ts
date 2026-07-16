@@ -1,5 +1,5 @@
 // frontend/src/api/analystFlavorsClient.ts
-// Client for the per-analyst FLAVORS endpoint (docs/OPTIONS_AND_AGENCY_EXPANSION.md §10.5).
+// Client for the per-analyst FLAVORS endpoint (docs/EXTENDING_ANALYSTS.md §8).
 //
 // GET  /analyst-flavors  — resolved { flavors, selectedId } for (session, agency, analyst)
 // POST /analyst-flavors  — full replace of the user's flavor set + selection

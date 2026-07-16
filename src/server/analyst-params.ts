@@ -1,6 +1,6 @@
 // src/server/analyst-params.ts
 // Per-analyst tunable WEIGHTS store (the "adjustable params" half of the
-// per-card Settings panel, docs/CARD_SETTINGS_PANEL.md).
+// per-card Settings panel, docs/EXTENDING_ANALYSTS.md.
 //
 // The token+URI half already lives in AnalystConfigStore (POST /analyst-config,
 // with the URI carried in `extra`). This store holds the SAVED `params` map

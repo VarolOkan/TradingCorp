@@ -1,5 +1,5 @@
 // frontend/src/api/analystParamsClient.ts
-// Client for the per-analyst tunable WEIGHTS endpoint (docs/CARD_SETTINGS_PANEL.md).
+// Client for the per-analyst tunable WEIGHTS endpoint (docs/EXTENDING_ANALYSTS.md).
 //
 // POST /analyst-params  — save weight overrides for (session, agency, analyst)
 // GET  /analyst-params  — load saved weights for a whole agency (repopulate panels)

@@ -1,5 +1,5 @@
 // frontend/src/api/llmConfigClient.ts
-// Client for the LLM provider/model config endpoints (docs/OPTIONS_AND_AGENCY_EXPANSION.md §12).
+// Client for the LLM provider/model config endpoints (docs/EXTENDING_ANALYSTS.md § options flavors + LLM step).
 //
 // GET  /llm-config  → { configs: LlmModelConfigPublic[], agencyModelRole }
 // POST /llm-config  → full replace of the 3 role configs (+ optional agencyModelRole)
