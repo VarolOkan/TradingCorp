@@ -58,7 +58,7 @@ export function AnalysisView({
   // dialog's state here too, so clicking the gear actually opens the token
   // dialog instead of a dead copy.
   const [configuredSourceKeysInternal, setConfiguredSourceKeysInternal] = useState<Set<string>>(configuredSourceKeys);
-  const { running, result, error, submit, analystTraces, reset: resetAnalysis } = useAnalysis(socket);
+  const { running, result, error, runId, submit, analystTraces, reset: resetAnalysis } = useAnalysis(socket);
   // Analyst wall is driven by the REAL per-analyst events streamed from the
   // backend for the most recent submission's tickers.
   const [wallTickers, setWallTickers] = useState<string[]>([]);
@@ -386,7 +386,7 @@ export function AnalysisView({
         </button>
         <div className="collapsible" aria-expanded={resultsOpen}>
           <div className="collapsible-inner">
-            <ResultsPanel result={result} onResultSaved={() => setSaved(true)} />
+            <ResultsPanel key={runId} result={result} onResultSaved={() => setSaved(true)} />
           </div>
         </div>
       </div>

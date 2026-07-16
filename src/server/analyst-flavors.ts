@@ -21,6 +21,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { AnalystFlavor } from '../types/registry';
+import { dataFilePath } from './dataDir';
 
 /** Composite key for a saved flavor set. */
 export interface FlavorKey {
@@ -50,7 +51,7 @@ export class AnalystFlavorStore {
 
   constructor(dataPath?: string) {
     this.dataPath = dataPath || process.env.FLAVOR_STORE_PATH ||
-      path.join(process.cwd(), '.data', 'flavors.json');
+      dataFilePath('flavors.json');
     this.load();
   }
 
@@ -131,7 +132,9 @@ export class AnalystFlavorStore {
         ? f.modelRole
         : undefined;
       if (isDefault) defaultCount += 1;
-      flavors.push({ id, name, role, instructions, isDefault, enabled, modelRole });
+      const flavor: AnalystFlavor = { id, name, role, instructions, isDefault, enabled };
+      if (modelRole) flavor.modelRole = modelRole;
+      flavors.push(flavor);
     }
 
     if (defaultCount > 1) errors.push('at most one flavor may be isDefault');

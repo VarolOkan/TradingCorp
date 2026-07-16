@@ -1,7 +1,7 @@
 // src/registry/logic/universe/providers.test.ts
 // Phase 1: provider + index integration tests. NETWORK-FREE — every
 // provider is driven by an injected mock fetch, so no real HTTP happens.
-import { makeNasdaqTraderProvider } from './nasdaqTraderProvider';
+import { makeNasdaqTraderProvider, isPlainEquitySymbol } from './nasdaqTraderProvider';
 import { makeSecProvider } from './secProvider';
 import { makeWikipediaSp500Provider, makeSp500CsvProvider } from './wikipediaSp500Provider';
 import { makeYahooQuoteProvider } from './quoteProvider';
@@ -26,7 +26,10 @@ const NASDAQ_TXT =
   'Nasdaq Traded|Symbol|Security Name|Listing Exchange|Market Category|ETF|Round Lot Size|Test Issue|Financial Status|CQS Symbol|NASDAQ Symbol|NextShares\n' +
   'Y|AAPL|Apple Inc.|Q|Q|N|100|N|N|AAPL|AAPL|A|\n' +
   'Y|ZZZZ|Z Test|Q|Q|N|100|Y|N|ZZZZ|ZZZZ|A|\n' + // test issue -> dropped
-  'Y|PENY|-penny Inc.|Q|Q|N|100|N|N|PENY|PENY|A|\n'; // will fail quote gates
+  'Y|PENY|-penny Inc.|Q|Q|N|100|N|N|PENY|PENY|A|\n' + // will fail quote gates
+  'Y|COF$N|Capital One N|Q|Q|N|100|N|N|COF$N|COF$N|A|\n' + // share-class $ -> dropped
+  'Y|SES.W|Ses Warrant|N|N|N|100|N|N|SES.W|SES.W|N|\n' + // warrant .W -> dropped
+  'Y|UNIT.U|Unit|N|N|N|100|N|N|UNIT.U|UNIT.U|N|\n'; // unit .U -> dropped
 
 const SEC_JSON = {
   '0': { cik_str: 320193, ticker: 'AAPL', title: 'Apple Inc.' },
@@ -54,11 +57,38 @@ const YH_QUOTE = {
 };
 
 describe('universe providers', () => {
-  it('nasdaqTrader drops Test Issues and maps exchanges', async () => {
+  it('nasdaqTrader drops Test Issues and maps exchanges (raw provider keeps non-equity lines)', async () => {
     const p = makeNasdaqTraderProvider({ fetchFn: mockFetch({ nasdaqtraded: NASDAQ_TXT }) });
     const syms = await p.fetchSymbols();
-    expect(syms.map((s) => s.ticker)).toEqual(['AAPL', 'PENY']); // ZZZZ (test) dropped
+    // Raw provider is faithful to the file: ZZZZ (test issue) dropped, but the
+    // non-equity derivatives (COF$N, SES.W, UNIT.U) are KEPT here — they are
+    // filtered out later, at universe-assembly time in getUniverse().
+    expect(syms.map((s) => s.ticker)).toEqual(['AAPL', 'PENY', 'COF$N', 'SES.W', 'UNIT.U']);
     expect(syms[0]!.exchange).toBe('NASDAQ');
+  });
+
+  it('isPlainEquitySymbol accepts common stocks and rejects derivative lines', () => {
+    expect(isPlainEquitySymbol('AAPL')).toBe(true);
+    expect(isPlainEquitySymbol('BRK.B')).toBe(false); // class suffix
+    expect(isPlainEquitySymbol('COF$N')).toBe(false); // NASDAQ share-class
+    expect(isPlainEquitySymbol('SES.W')).toBe(false); // warrant
+    expect(isPlainEquitySymbol('UNIT.U')).toBe(false); // unit
+    expect(isPlainEquitySymbol('Z-RIGHT')).toBe(false); // separator
+  });
+
+  it('getUniverse drops non-equity symbols from the broad pool (not the fallback)', async () => {
+    const fetchFn = mockFetch({ nasdaqtraded: NASDAQ_TXT });
+    const out = await getUniverse({ providerId: 'nasdaqtrader', fetchFn });
+    const tickers = out.quotes.map((q) => q.ticker);
+    expect(tickers).toContain('AAPL');
+    expect(tickers).not.toContain('COF$N');
+    expect(tickers).not.toContain('SES.W');
+    expect(tickers).not.toContain('UNIT.U');
+    expect(out.trace.usedFallback).toBe(false);
+    // The provider step records exactly how many were dropped + why.
+    const providerStep = out.trace.steps.find((s) => s.source === 'nasdaqtrader');
+    expect(providerStep?.result).toContain('dropped 3 non-equity symbol');
+    expect(providerStep?.result).toContain('COF$N');
   });
 
   it('sec returns broad pool with cik', async () => {

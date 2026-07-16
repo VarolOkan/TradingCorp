@@ -25,6 +25,21 @@ const EXCH: Record<string, Exchange> = {
   Z: 'CBOE',
 };
 
+/**
+ * NASDAQ/Tape symbology markers for NON-common-equity lines. A plain US equity
+ * ticker is uppercase letters/digits only. These separators denote derivative /
+ * non-common lines that (a) usually resolve poorly or not at all on the quote
+ * provider, and (b) have no business being ranked by an equity promise model:
+ *   $  → NASDAQ share-class / series suffix (e.g. COF$N)
+ *   .  → warrant (.W/.WS), unit (.U), right (.R), preferred (.P), class (.A/.B)
+ * We drop them at universe-assembly time so they never reach a quote/news/bars
+ * call, and never show up as confusing half-populated rows in results.
+ */
+export function isPlainEquitySymbol(ticker: string): boolean {
+  // Allow only A-Z and 0-9. No $, ., -, or other separators.
+  return /^[A-Z0-9]+$/.test(ticker.toUpperCase());
+}
+
 const DEFAULT_URL = 'https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt';
 
 export function makeNasdaqTraderProvider(opts: { url?: string; fetchFn?: FetchFn } = {}): UniverseProvider {

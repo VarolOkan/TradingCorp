@@ -10,7 +10,7 @@
 // If every source fails, gracefully fall back to the legacy hardcoded
 // DEFAULT_UNIVERSE (kept here so the screen never breaks).
 import { realFetch, type FetchFn } from './sharedFetch';
-import { makeNasdaqTraderProvider } from './nasdaqTraderProvider';
+import { makeNasdaqTraderProvider, isPlainEquitySymbol } from './nasdaqTraderProvider';
 import { makeSecProvider } from './secProvider';
 import { makeWikipediaSp500Provider, makeSp500CsvProvider } from './wikipediaSp500Provider';
 import { makeYahooQuoteProvider } from './quoteProvider';
@@ -96,15 +96,23 @@ export async function getUniverse(
       const syms = await registry[id]!.fetchSymbols();
       const parsed = syms.length;
       if (parsed > 0) {
-        symbols = syms;
+        // Drop non-common-equity lines (NASDAQ share-class $, warrants/units/
+        // rights/preferred .X) before they ever hit a quote/news/bars call or
+        // surface as confusing half-populated rows. Counted for lineage.
+        const nonEquity = syms.filter((s) => !isPlainEquitySymbol(s.ticker));
+        symbols = syms.filter((s) => isPlainEquitySymbol(s.ticker));
+        const kept = symbols.length;
         winningId = id;
         steps.push({
           source: id,
           kind: 'provider',
           listed: parsed,
-          parsed,
-          result: 'ok',
-          total: parsed,
+          parsed: kept,
+          result:
+            nonEquity.length > 0
+              ? `ok (dropped ${nonEquity.length} non-equity symbol${nonEquity.length === 1 ? '' : 's'}: ${nonEquity.map((s) => s.ticker).join(', ')})`
+              : 'ok',
+          total: kept,
         });
         break;
       }

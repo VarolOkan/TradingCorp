@@ -20,6 +20,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import type { LlmRole, LlmProvider } from './llm-config';
 import { resolveVaultUserId } from './llm-vault';
+import { dataFilePath } from './dataDir';
 
 export interface RoleConfigRow {
   role: LlmRole;
@@ -29,8 +30,7 @@ export interface RoleConfigRow {
 }
 
 const DEFAULT_DB_PATH = (): string =>
-  process.env.LLM_SQLITE_PATH ||
-  path.join(process.cwd(), '.data', 'llm-config.db');
+  process.env.LLM_SQLITE_PATH || dataFilePath('llm-config.db');
 
 export class SqliteLlmStore {
   private db: Database.Database | null = null;

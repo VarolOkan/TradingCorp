@@ -21,6 +21,8 @@
 import fs from 'fs';
 import path from 'path';
 import type { LlmRole, LlmProvider } from './llm-config';
+import { logger } from '../utils/logger';
+import { dataFilePath } from './dataDir';
 
 export interface RoleConfigRow {
   role: LlmRole;
@@ -35,8 +37,7 @@ interface DiskShape {
 }
 
 const DEFAULT_DB_PATH = (): string =>
-  process.env.LLM_JSON_PATH ||
-  path.join(process.cwd(), '.data', 'llm-config.json');
+  process.env.LLM_JSON_PATH || dataFilePath('llm-config.json');
 
 export class JsonLlmStore {
   private data: DiskShape = { roles: {}, agencyRoles: {} };
@@ -69,10 +70,21 @@ export class JsonLlmStore {
   }
 
   private flush(): void {
+    const snapshot = JSON.stringify(this.data, null, 2);
+    // Trace EVERY write to llm-config.json: a stack capture (so we can see
+    // exactly which code path triggered the overwrite) plus the full content
+    // about to be persisted. This is the audit trail for the recurring
+    // "model changed again / wiped" bug — unexpected writes become visible in
+    // the server log (GET /server-log) with their origin.
+    const trace = new Error('llm-config.json write');
+    logger.warn(
+      `[LLM-CONFIG-WRITE] writing ${this.dbPath} (userId=${this.userId}) — stack:\n${trace.stack}`,
+    );
+    logger.warn(`[LLM-CONFIG-WRITE] content:\n${snapshot}`);
     try {
       const dir = path.dirname(this.dbPath);
       if (dir && !fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.dbPath, JSON.stringify(this.data, null, 2), 'utf8');
+      fs.writeFileSync(this.dbPath, snapshot, 'utf8');
     } catch {
       // Best-effort persistence; never break the request path on disk errors.
     }

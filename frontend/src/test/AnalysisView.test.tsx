@@ -187,6 +187,27 @@ describe('AnalysisView — agency-switch unsaved-results guard', () => {
       expect(screen.queryByTestId('agency-switch-confirm')).toBeNull();
     });
   });
+
+  it('restores the Save button for a NEW run after the previous one was saved', async () => {
+    // Regression: ResultsPanel holds `reportFiles` in LOCAL state. Once run #1
+    // is saved, that state persisted into the next run and the button never came
+    // back. runId-bumped `key` now remounts the panel per run, clearing it.
+    const socket = recordingSocket();
+    render(<AnalysisView socket={socket as any} connected={true} />);
+
+    // Run #1 completes and is saved.
+    act(() => { socket._fire('analysis_complete', COMPLETE); });
+    fireEvent.click(screen.getByTestId('export-report'));
+    await waitFor(() => expect(screen.getByTestId('report-links')).toHaveTextContent(/Saved/));
+
+    // Run #2 starts (analysis_start bumps runId) and completes.
+    act(() => { socket._fire('analysis_start', { tickers: ['ACME'] }); });
+    act(() => { socket._fire('analysis_complete', COMPLETE); });
+
+    // The Save button MUST be back — a fresh panel, not the stale saved state.
+    expect(screen.getByTestId('export-report')).toBeInTheDocument();
+    expect(screen.queryByTestId('report-links')).toBeNull();
+  });
 });
 
 // --- Screener "→ Analyze" fills input, runs, AND collapses the panel ---

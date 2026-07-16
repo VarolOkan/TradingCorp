@@ -27,6 +27,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { dataDir, dataFilePath } from './dataDir';
 import type { AgencyDef, AgencyAnalystRef, AnalystDef } from '../types/registry';
 
 export type OverrideKind =
@@ -84,7 +85,7 @@ export interface RegistryStore {
 // ----------------------------------------------------------------------------
 
 const DEFAULT_JSON_DIR = (): string =>
-  process.env.REGISTRY_STORE_DIR || path.join(process.cwd(), '.data');
+  process.env.REGISTRY_STORE_DIR || dataDir();
 
 export class RegistryJsonStore implements RegistryStore {
   readonly driver = 'json' as const;
@@ -206,7 +207,7 @@ export class RegistrySqliteStore implements RegistryStore {
 
   constructor(dbPath?: string) {
     this.dbPath = dbPath || process.env.REGISTRY_SQLITE_PATH ||
-      path.join(process.cwd(), '.data', 'registry.db');
+      dataFilePath('registry.db');
   }
 
   private ensure(): BetterSqlite3.Database {
