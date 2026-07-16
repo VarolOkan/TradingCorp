@@ -640,6 +640,7 @@ export function SettingsDialog({
       await postSettings(settings, sessionId);
       setConnSaved(true);
       onSaved?.(settings);
+      onClose(); // Accept = save + close the dialog.
     } catch (err) {
       setConnError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -675,6 +676,7 @@ export function SettingsDialog({
       setLlmTokens({});
       setLlmSaved(true);
       llmDirty.current = false;
+      onClose(); // Accept = save + close the dialog.
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : String(err));
     } finally {

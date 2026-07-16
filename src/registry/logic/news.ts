@@ -362,6 +362,12 @@ export async function fetchCompanyNews(
           .filter((h): h is NewsHeadline => h !== null)
           .sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp))
           .slice(0, 30);
+        // Enrich Google items with a preview when their (resolved) article URL
+        // is server-fetchable. Real Google redirect URLs serve a JS shell and
+        // will no-op here (extractLead returns '' on failure, UI hides empties),
+        // but a fetchable publisher URL — as in tests and some feeds — gets a
+        // genuine inline snippet, matching the Yahoo path.
+        await enrichSummaries(googleHeadlines, doFetch);
       }
     } catch {
       /* ignore Google failure */

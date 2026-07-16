@@ -317,9 +317,16 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
     dependsOn: ['orchestrator'],
     dataSources: [
       { from: 'orchestrator', fields: ['tickers', 'options'], label: 'Orchestrator routing', sources: ['(pipeline internal)'] },
-      { id: 'polygonOptions', type: 'rest', endpoint: 'https://api.polygon.io/v3/snapshot/options/{ticker}', auth: 'bearer', fields: ['option_chain', 'greeks'], label: 'Polygon Options', sources: ['Polygon Options'], timeoutMs: 8000, retries: 1, onError: 'degrade' },
-      { id: 'polygonHist', type: 'rest', endpoint: 'https://api.polygon.io/v2/aggs/ticker/{ticker}/range', auth: 'bearer', fields: ['price_bars'], label: 'Polygon Aggregates', sources: ['Polygon Aggregates'], timeoutMs: 8000, retries: 1, onError: 'degrade' },
-      { id: 'treasuryRfr', type: 'rest', endpoint: 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates', auth: 'apikey', fields: ['rfr'], label: 'Treasury RFR', sources: ['US Treasury'], timeoutMs: 8000, retries: 1, onError: 'degrade' },
+      // §4.9 LIVE sources. The engine fetches these with per-source timeout +
+      // retries + onError:'degrade'. With NO key injected, resolveToken returns
+      // '' → auth header absent → Polygon 401 / Treasury 401 → 'degraded'
+      // (skipped). The options_ingestion handler consumes sourceStatus to decide
+      // live-vs-mock (parity: no key = deterministic mock, unchanged behaviour).
+      // `fields:['results']`/`okPath` let the engine validate the real envelope
+      // and carry the raw payload in `merged` for the handler's parser.
+      { id: 'polygonOptions', type: 'rest', endpoint: 'https://api.polygon.io/v3/snapshot/options/{ticker}', auth: 'bearer', fields: ['options_results'], okPath: 'options_results.options', label: 'Polygon Options', sources: ['Polygon Options'], timeoutMs: 8000, retries: 1, onError: 'degrade' },
+      { id: 'polygonHist', type: 'rest', endpoint: 'https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/2025-01-01/2026-07-10', auth: 'bearer', fields: ['agg_results'], okPath: 'agg_results[0]', label: 'Polygon Aggregates', sources: ['Polygon Aggregates'], timeoutMs: 8000, retries: 1, onError: 'degrade' },
+      { id: 'treasuryRfr', type: 'rest', endpoint: 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates?filter=security_desc:eq:Marketable&field=avg_interest_rate_amt', auth: 'apikey', fields: ['data'], okPath: 'data[0]', label: 'Treasury RFR', sources: ['US Treasury'], timeoutMs: 8000, retries: 1, onError: 'degrade' },
     ],
     logic: { mode: 'fn', fn: 'optionsIngest', llm: { enabled: false } },
     output: { channels: ['option_chain_data', 'underlying_data', 'greeks_data'], storeInMessages: true },

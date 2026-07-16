@@ -28,11 +28,20 @@ import {
   optionsRiskHandler,
 } from './logic/options-handlers';
 
+import type { AnalystAcquisition } from './sources';
+
 /** Signature of every analyst logic handler. The third arg is the NodeSurface
  *  the node injects (so it can capture/relay progress); the second is optional
  *  tuning (agency horizon + per-analyst params). When tuning is omitted the
- *  handler reproduces the legacy long-term behaviour byte-for-byte. */
-export type AnalystFn = (state: AgentState, tuning?: AnalystTuning, surface?: NodeSurface) => Promise<AgentState>;
+ *  handler reproduces the legacy long-term behaviour byte-for-byte. The optional
+ *  4th arg carries the §4.9 acquisition result (sourceStatus + merged payloads)
+ *  so ingestion analysts can consume live data the engine already fetched. */
+export type AnalystFn = (
+  state: AgentState,
+  tuning?: AnalystTuning,
+  surface?: NodeSurface,
+  acquired?: AnalystAcquisition,
+) => Promise<AgentState>;
 
 // One shared surface — every handler records progress/messages/traces through
 // it, so behaviour is identical regardless of which graph invokes the handler.
@@ -52,7 +61,7 @@ export const ANALYST_LOGIC_REGISTRY: Record<string, AnalystFn> = {
   riskAssessment: (s, t, surf) => riskHandler(s, surf ?? sharedSurface, t),
   governanceDecision: (s, t, surf) => governanceHandler(s, surf ?? sharedSurface, t),
   // ---- Phase B: options analysts (fn) ----
-  optionsIngest: (s, t, surf) => optionsIngestionHandler(s, surf ?? sharedSurface, t),
+  optionsIngest: (s, t, surf, acquired) => optionsIngestionHandler(s, surf ?? sharedSurface, t, acquired),
   volSurfaceAnalysis: (s, t, surf) => volSurfaceHandler(s, surf ?? sharedSurface, t),
   optionsPricingAnalysis: (s, t, surf) => optionsPricingHandler(s, surf ?? sharedSurface, t),
   optionsGreeksAnalysis: (s, t, surf) => optionsGreeksHandler(s, surf ?? sharedSurface, t),

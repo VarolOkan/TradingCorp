@@ -46,8 +46,8 @@ describe('news.ts keyword-polarity scoring', () => {
 
   it('fetches Yahoo Finance RSS and previews real article text', async () => {
     const yahooRss = `<?xml version="1.0"?><rss><channel>
-      <item><title>AAPL surges on record iPhone sales</title><link>https://finance.yahoo.com/news/aapl1</link><source url="https://yahoo.com">Yahoo</source><pubDate>Mon, 02 Jun 2026 14:00:00 GMT</pubDate></item>
-      <item><title>AAPL downgraded by analysts</title><link>https://finance.yahoo.com/news/aapl2</link><source url="https://yahoo.com">Yahoo</source><pubDate>Tue, 03 Jun 2026 10:00:00 GMT</pubDate></item>
+      <item><title>AAPL surges on record iPhone sales</title><link>https://finance.yahoo.com/news/aapl1</link><source url="https://yahoo.com">Yahoo</source><pubDate>Tue, 03 Jun 2026 14:00:00 GMT</pubDate></item>
+      <item><title>AAPL downgraded by analysts</title><link>https://finance.yahoo.com/news/aapl2</link><source url="https://yahoo.com">Yahoo</source><pubDate>Mon, 02 Jun 2026 10:00:00 GMT</pubDate></item>
     </channel></rss>`;
     const article = `<!doctype html><body><script>x</script><p>Apple shares jumped to a record high on Monday after strong iPhone demand. Analysts lifted price targets across the board.</p></body>`;
     const fake = async (url: string) => {

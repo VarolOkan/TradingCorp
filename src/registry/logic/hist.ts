@@ -551,6 +551,95 @@ export function parseYahooOptions(ticker: string, payload: any): OptionChainResu
   };
 }
 
+/** PURE parser: Polygon v3 options snapshot payload → OptionQuote[].
+ *  Accepts either the raw `results` object (v3 shape: { ticker, underlying_asset,
+ *  options: [...] }) or the bare options array. Extracted from fetchOptionChain
+ *  so the §4.9 acquisition engine (which may have already fetched + validated the
+ *  snapshot) can reuse the exact same parsing without re-fetching. Returns null
+ *  when the payload is unusable. */
+export function parsePolygonChainResults(payload: any, ticker: string): OptionChainResult | null {
+  const sym = String(ticker).trim().toUpperCase();
+  // Normalize to the options array regardless of how the caller sliced it.
+  const results: any[] = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.options)
+      ? payload.options
+      : Array.isArray(payload?.results)
+        ? payload.results
+        : [];
+  if (results.length === 0) return null;
+  const quotes: OptionQuote[] = [];
+  const expirySet = new Set<string>();
+  const underlyingPrice =
+    numOr(payload?.underlying_asset?.last_price) ||
+    numOr(results[0]?.underlying_asset?.last_price) ||
+    numOr(results[0]?.details?.underlying_asset?.last_price);
+  const spot = underlyingPrice || basePrice(sym);
+  for (const c of results) {
+    const d = c.details ?? {};
+    const expiry = (d.expiration_date as string) ?? '';
+    const strike = numOr(d.strike_price);
+    const type: OptionRight = d.contract_type === 'put' ? 'P' : 'C';
+    const greeks = c.greeks ?? {};
+    const lastQuote = c.last_quote ?? {};
+    const bid = numOr(lastQuote.bid);
+    const ask = numOr(lastQuote.ask);
+    const last = numOr(greeks.last_price ?? c.last_trade?.price ?? (bid + ask) / 2);
+    const iv = numOr(greeks.implied_volatility, 0.3);
+    const volume = numOr(c.last_trade?.size ?? greeks.size ?? 0);
+    const openInterest = numOr(d.open_interest ?? 0);
+    if (!expiry || strike <= 0) continue;
+    expirySet.add(expiry);
+    quotes.push({
+      expiry,
+      strike,
+      type,
+      bid,
+      ask,
+      last,
+      volume,
+      open_interest: openInterest,
+      iv,
+      underlying_price: spot,
+      underlying_ts: new Date().toISOString(),
+    });
+  }
+  if (quotes.length === 0) return null;
+  const rfr = resolveRfr();
+  return {
+    ticker: sym,
+    underlying_price: spot,
+    quotes,
+    expiries: Array.from(expirySet).sort(),
+    rfr,
+    greeks: chainToGreeksRows(quotes, spot, rfr),
+    source: 'polygon',
+  };
+}
+
+/** PURE parser: Polygon v2 aggregates `results` array → PriceBar[]. */
+export function parsePolygonAggregates(results: any, interval: BarInterval = '1d'): PriceBar[] {
+  if (!Array.isArray(results)) return [];
+  return results
+    .filter((r: any) => r && typeof r.t === 'number')
+    .map((r: any) => ({
+      t: new Date(r.t).toISOString(),
+      open: numOr(r.o) ?? 0,
+      high: numOr(r.h) ?? 0,
+      low: numOr(r.l) ?? 0,
+      close: numOr(r.c) ?? 0,
+      volume: numOr(r.v) ?? 0,
+    }))
+    .filter((b: PriceBar) => b.close > 0);
+}
+
+/** PURE parser: Treasury avg_interest_rates data row → annualized rfr (0..1). */
+export function parseTreasuryRfr(row: any): number | null {
+  const v = numOr(row?.avg_interest_rate_amt);
+  if (v === null) return null;
+  // Treasury publishes percent (e.g. 4.32); normalize to a 0..1 rate.
+  return v / 100;
+}
 /** Fetch a URL with a few short retries (handles Yahoo's intermittent 429s). */
 async function fetchWithRetry(gf: (u: string, i?: any) => Promise<any>, url: string, headers: Record<string, string>, tries = 3): Promise<any> {
   let lastErr: any;

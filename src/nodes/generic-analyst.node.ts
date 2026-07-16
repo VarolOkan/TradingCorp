@@ -87,12 +87,21 @@ export class GenericAnalystNode {
     //    NO fn handler — they execute via the declarative engine. fn analysts
     //    delegate to the registered handler (which closes over the shared
     //    surface), so we call it with state + tuning.
+    //
+    // 1.0) §4.9 multi-source acquisition runs BEFORE the handler so its result
+    //      can be passed into ingestion handlers (which consume live payloads).
+    //      No-op for declarative/mock-only analysts → legacy parity preserved.
+    const sources = (this.def.dataSources ?? []).filter(isLiveSource);
+    const acquisition = sources.length > 0
+      ? await acquireForAnalyst(this.def, this.buildAcquireContext(state))
+      : null;
+
     let updated: AgentState;
     if (this.def.logic.mode === 'declarative') {
       updated = await declarativeHandler(state, surface, this.def, tuning);
     } else {
       const handler = getLogicHandler(this.def.logic.fn ?? this.def.id);
-      updated = await handler(state, tuning, surface);
+      updated = await handler(state, tuning, surface, acquisition ?? undefined);
     }
 
     // 1.5) Phase F — optional LLM "does the work" step. Runs ONLY when the
@@ -156,13 +165,8 @@ export class GenericAnalystNode {
       }
     }
 
-    // 2) §4.9 multi-source acquisition (only for genuinely fetchable sources;
-    //    no-op for declarative/mock sources → legacy parity preserved).
-    const sources = (this.def.dataSources ?? []).filter(isLiveSource);
-    const acquisition = sources.length > 0
-      ? await acquireForAnalyst(this.def, this.buildAcquireContext(state))
-      : null;
-
+    // 2) §4.9 multi-source acquisition result (computed in step 1.0, before the
+    //    handler) is now attached to the trace + accumulated into dataHealth.
     if (acquisition) {
       // Attach source status to this analyst's trace, if one exists.
       const traces = Array.isArray(updated.analystTraces) ? [...updated.analystTraces] : [];

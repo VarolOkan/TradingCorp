@@ -47,7 +47,7 @@ describe('SettingsDialog', () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it('saves valid settings and calls onSaved', async () => {
+  it('saves valid settings, calls onSaved, and closes the dialog (Accept)', async () => {
     const postSpy = vi.spyOn(configClient, 'postSettings').mockResolvedValue({
       ok: true,
       sessionId: 'default',
@@ -67,6 +67,8 @@ describe('SettingsDialog', () => {
     expect(onSaved).toHaveBeenCalledWith(
       expect.objectContaining({ baseUri: 'https://x.example' })
     );
+    // Accept must close the dialog (regression: handler saved but never closed).
+    expect(onClose).toHaveBeenCalledTimes(1);
     postSpy.mockRestore();
   });
 
@@ -159,9 +161,9 @@ describe('SettingsDialog LLM Models tab', () => {
     expect(screen.queryByLabelText('deep-thought not configured')).toBeNull();
   });
 
-  it('saving posts the three role configs and closes (Accept)', async () => {
+  it('saving the LLM Models tab posts the three role configs and closes the dialog (Accept)', async () => {
     const postSpy = vi.spyOn(llmConfigClient, 'postLlmConfig');
-    const { unmount } = render(<SettingsDialog open onClose={onClose} agencyId="ag-equities" />);
+    render(<SettingsDialog open onClose={onClose} agencyId="ag-equities" />);
     fireEvent.click(screen.getByTestId('tab-llm'));
     await screen.findByTestId('llm-role-deep-thought');
 
@@ -175,9 +177,27 @@ describe('SettingsDialog LLM Models tab', () => {
     // The per-agency default-model control now lives in AgencySettingsDialog,
     // so the main dialog no longer posts an agency override.
     expect(screen.queryByTestId('agency-model-role')).not.toBeInTheDocument();
-    // Accept saves; the dialog closes on unmount (no leaked timer).
-    unmount();
-    expect(onClose).toHaveBeenCalled();
+    // Accept must close the dialog directly (not only on unmount) — regression:
+    // previously the handler saved but never called onClose, so the dialog
+    // lingered and a later re-render could revert the user's model selection.
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('changing a role model and saving posts the NEW model (no revert at submit)', async () => {
+    const postSpy = vi.spyOn(llmConfigClient, 'postLlmConfig');
+    render(<SettingsDialog open onClose={onClose} agencyId="ag-equities" />);
+    fireEvent.click(screen.getByTestId('tab-llm'));
+    await screen.findByTestId('llm-role-deep-thought');
+
+    const NEW_MODEL = 'openai/gpt-5';
+    fireEvent.change(screen.getByLabelText('deep-thought model'), { target: { value: NEW_MODEL } });
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    const body = postSpy.mock.calls[0][0] as llmConfigClient.LlmConfigPost;
+    const saved = body.configs.find((c) => c.role === 'deep-thought')!;
+    expect(saved.model).toBe(NEW_MODEL);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('Test button probes the provider and shows a success result', async () => {

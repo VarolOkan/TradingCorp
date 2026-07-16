@@ -5,6 +5,7 @@
 // state.optionsData for the downstream analysts (mirrors data-ingestion.ts).
 
 import type { AgentState } from '../../types/financial-analysis';
+import type { HistoricalBundle, PriceBarSeries } from '../../types/financial-analysis';
 import type { AnalystTuning } from '../../types/registry';
 import type { NodeSurface } from './shared';
 import { annotateDataReceived, recordDataReceived } from './shared';
@@ -19,7 +20,103 @@ import {
   atmStrike,
   type FnAnalystConfig,
 } from './options-shared';
-import { resolveLiveOptionsBundle } from './hist';
+import {
+  resolveLiveOptionsBundle,
+  generateMockBundle,
+  parsePolygonChainResults,
+  parsePolygonAggregates,
+  parseTreasuryRfr,
+  type OptionChainResult,
+  type LiveOptionsResult,
+} from './hist';
+import type { AnalystAcquisition } from '../sources';
+import { DEFAULT_RFR, yearsToExpiry, bsGreeks } from './greeks';
+
+/**
+ * Extract an annualized risk-free rate (0..1) from a Treasury avg_interest_rates
+ * data row. Treasury publishes a PERCENT (e.g. 4.32); normalize to 0..1.
+ * Returns undefined when the row has no usable rate (so callers keep DEFAULT_RFR).
+ */
+function numOrRate(row: any): number | undefined {
+  const v = parseTreasuryRfr(row);
+  return v === null ? undefined : v;
+}
+
+/**
+ * Compose a HistoricalBundle from §4.9-engine-acquired raw payloads (already
+ * fetched + validated by acquireForAnalyst). Each live piece is overlaid on the
+ * deterministic mock base; any missing piece keeps its mock fallback so output
+ * shape is always complete (parity: a partial live response never throws). This
+ * is the single point where options_ingestion consumes the engine's result.
+ */
+async function resolveEngineBundle(
+  ticker: string,
+  profile: any,
+  parts: { chainPayload?: any; histPayload?: any; rfr?: number | undefined },
+): Promise<LiveOptionsResult> {
+  const base = generateMockBundle(ticker, profile);
+  const rfr = typeof parts.rfr === 'number' && Number.isFinite(parts.rfr) ? parts.rfr : DEFAULT_RFR;
+
+  // Option chain (Polygon v3 snapshot results array).
+  let option_chain = base.option_chain;
+  let expiries = base.expiries;
+  let underlying_price = base.underlying_price;
+  let chainLive = false;
+  if (parts.chainPayload) {
+    const parsed: OptionChainResult | null = parsePolygonChainResults(parts.chainPayload, ticker);
+    if (parsed && parsed.quotes.length > 0) {
+      option_chain = parsed.quotes;
+      expiries = parsed.expiries;
+      underlying_price = parsed.underlying_price;
+      chainLive = true;
+    }
+  }
+
+  // Price bars (Polygon v2 aggregates results array).
+  let price_bars: PriceBarSeries[] = base.price_bars;
+  let barsLive = false;
+  if (parts.histPayload) {
+    const bars = parsePolygonAggregates(parts.histPayload, '1d');
+    if (bars.length > 0) {
+      price_bars = [{ interval: '1d', lookback_days: bars.length, bars }];
+      barsLive = true;
+    }
+  }
+
+  // Greeks are re-derived with the (possibly live) rfr so they stay consistent.
+  const greeks = option_chain.map((q: any) => {
+    const ttm = yearsToExpiry(`${q.expiry}T00:00:00.000Z`, new Date());
+    const g = bsGreeks(q.type, underlying_price, q.strike, ttm, rfr, q.iv);
+    return {
+      expiry: q.expiry,
+      strike: q.strike,
+      type: q.type,
+      delta: parseFloat(g.delta.toFixed(4)),
+      gamma: parseFloat(g.gamma.toFixed(6)),
+      vega: parseFloat(g.vega.toFixed(4)),
+      theta: parseFloat(g.theta.toFixed(4)),
+      rho: parseFloat(g.rho.toFixed(4)),
+      iv_in: q.iv,
+      underlying_price,
+      ttm_years: parseFloat(ttm.toFixed(6)),
+      rfr,
+    };
+  });
+
+  const live = chainLive && barsLive;
+  return {
+    ticker,
+    underlying_price,
+    price_bars,
+    option_chain,
+    greeks,
+    rfr,
+    expiries,
+    iv_history: base.iv_history,
+    mock: !live,
+    source: live ? 'polygon' : 'mock',
+  };
+}
 
 // ------------------------------------------------------------------ ingestion
 
@@ -33,6 +130,12 @@ export async function optionsIngestionHandler(
   state: AgentState,
   node: NodeSurface,
   tuning?: AnalystTuning,
+  /** §4.9 acquisition result (sourceStatus + raw merged payloads). When the
+   *  engine successfully fetched live Polygon/Treasury sources, we prefer those
+   *  already-acquired payloads (no re-fetch, key not re-read). When the engine
+   *  degraded (no key), we fall back to resolveLiveOptionsBundle's mock path —
+   *  parity: no key = deterministic mock, unchanged behaviour. */
+  acquired?: AnalystAcquisition,
 ): Promise<AgentState> {
   node.emitProgress(state, 'analyst:start', 'options_ingestion', { stage: 1, tickers: state.tickers });
   let updatedState = node.updateStep(state, 'options_ingestion_start');
@@ -47,14 +150,35 @@ export async function optionsIngestionHandler(
     const optionsData: Record<string, any> = {};
     const inputs: Array<{ ticker: string; label: string; data: Record<string, any>; sources: string[] }> = [];
     let anyLive = false;
+    const profile = profileFromTuning(tuning);
+    // Engine acquisition is the gate: if it fetched live Polygon/Treasury, the
+    // raw payloads sit in `acquired.merged` keyed by source field ('results').
+    const merged: Record<string, any> = acquired?.merged ?? {};
+    const srcStatus = acquired?.sourceStatus ?? {};
+    const engineHasChain = (srcStatus['polygonOptions'] === 'ok' || srcStatus['polygonOptions'] === 'fallback') && merged.options_results;
+    const engineHasHist = (srcStatus['polygonHist'] === 'ok' || srcStatus['polygonHist'] === 'fallback') && merged.agg_results;
+    const engineRfr = (srcStatus['treasuryRfr'] === 'ok' || srcStatus['treasuryRfr'] === 'fallback') && Array.isArray(merged.data) && merged.data.length > 0
+      ? numOrRate(merged.data[0])
+      : undefined;
+
     for (const ticker of state.tickers) {
       // Force a fresh fetch (ignore any pre-existing map) so ingestion is the
       // single writer of the shared bundle. Omit the key entirely (exactOptionalPropertyTypes).
       const { optionsData: _omit, ...freshState } = updatedState;
-      // Phase I: pull LIVE price bars + option chain when a provider key is
-      // available; degrade gracefully to the deterministic mock bundle (parity:
-      // no key = mock, unchanged behaviour).
-      const bundle = await resolveLiveOptionsBundle(ticker, profileFromTuning(tuning));
+      // Phase I: pull LIVE price bars + option chain when the §4.9 engine
+      // already acquired them (key present), else degrade gracefully to the
+      // deterministic mock bundle via resolveLiveOptionsBundle (parity: no key
+      // = mock, unchanged behaviour).
+      let bundle: LiveOptionsResult;
+      if (engineHasChain || engineHasHist || engineRfr !== undefined) {
+        const parts: { chainPayload?: any; histPayload?: any; rfr?: number | undefined } = {};
+        if (engineHasChain) parts.chainPayload = merged.options_results;
+        if (engineHasHist) parts.histPayload = merged.agg_results;
+        if (engineRfr !== undefined) parts.rfr = engineRfr;
+        bundle = await resolveEngineBundle(ticker, profile, parts);
+      } else {
+        bundle = await resolveLiveOptionsBundle(ticker, profile);
+      }
       optionsData[ticker] = bundle;
       if (bundle.source === 'polygon') anyLive = true;
       const liveSource =
