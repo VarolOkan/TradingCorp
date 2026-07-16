@@ -116,4 +116,17 @@ describe('ResultsPanel', () => {
     render(<ResultsPanel result={makeResult()} />);
     expect(screen.getByText(/Strong moat but priced for perfection/)).toBeInTheDocument();
   });
+
+  it('shows the MOCK-DISABLED banner when result.mockDisabled is set', () => {
+    render(<ResultsPanel result={makeResult({ mockDisabled: true })} />);
+    const banner = screen.getByTestId('mock-disabled-banner');
+    expect(banner).toBeInTheDocument();
+    expect(banner.textContent).toMatch(/MOCK DATA DISABLED/i);
+    expect(banner.textContent).toMatch(/not fabricated/i);
+  });
+
+  it('shows NO banner when mockDisabled is absent (default parity)', () => {
+    render(<ResultsPanel result={makeResult()} />);
+    expect(screen.queryByTestId('mock-disabled-banner')).toBeNull();
+  });
 });

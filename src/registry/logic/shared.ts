@@ -16,6 +16,7 @@
 import type { AgentState } from '../../types/financial-analysis';
 import type { DataReceivedBlock, DataReceivedEntry } from '../../types/financial-analysis';
 import { RetryHandler } from '../../utils/retry-handler';
+import { isMockDisabled } from './mockMode';
 
 /**
  * Minimal surface a handler needs from a BaseNode, so the pure logic handlers
@@ -95,12 +96,21 @@ export function stringToSeed(str: string): number {
   return Math.abs(hash);
 }
 
-/** Create a deterministic seeded RNG in [0, 1) (LCG). */
+/** Create a deterministic seeded RNG in [0, 1) (LCG).
+ *  When mock data is globally disabled (DISABLE_MOCK_DATA), this returns a
+ *  constant 0 for every draw — so every consumer collapses to its `?? 0`
+ *  fallback and NO fabricated numbers flow into the pipeline.
+ *  NOTE: clamped to [0,1) — Math.sin(seed) can be negative, and unclamped it
+ *  produced negative "mock" magnitudes (e.g. -43,563 balance sheets) that read
+ *  as corrupted data. Consumers expect a 0..1 fraction. */
 export function seededRandom(seed: number): () => number {
+  if (isMockDisabled()) return () => 0;
   let x = Math.sin(seed) * 10000;
   return () => {
     x = (x * 9301 + 49297) % 233280;
-    return x / 233280.0;
+    // Clamp to [0,1): x can be negative; the consumer contracts a 0..1 fraction.
+    const v = x / 233280;
+    return v < 0 ? v + 1 : v;
   };
 }
 

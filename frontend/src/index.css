@@ -140,6 +140,20 @@ body {
   background: #0f172a;
   color: #e2e8f0;
 }
+/* Banner shown when DISABLE_MOCK_DATA is on and the run had no live source:
+   the outputs are EMPTY (not fabricated), so we must never let them read as
+   a real analysis. Amber = caution, distinct from the green/red verdicts. */
+.mock-disabled-banner {
+  margin: 0 0 0.9rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.mock-disabled-banner strong { color: #fbbf24; }
 .result-head {
   display: flex;
   align-items: center;
@@ -1914,9 +1928,84 @@ body {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
-.trace-output-verdict { font-weight: 700; font-size: 0.95rem; color: #f8fafc; }
-.trace-output-score { font-size: 0.78rem; color: #cbd5e1; }
+.trace-output-verdict { font-weight: 700; font-size: 0.95rem; color: #f8fafc; padding: 0.1rem 0.6rem; border-radius: 999px; background: rgba(148,163,184,0.18); }
+.trace-output-score { font-size: 0.78rem; color: #cbd5e1; font-variant-numeric: tabular-nums; margin-left: 0.2rem; }
 .trace-output-summary { margin: 0.5rem 0 0; font-size: 0.8rem; color: #cbd5e1; line-height: 1.5; }
+/* Readable output block + per-ticker breakdown (previously the details were
+   never rendered, so the "Weighting -> Output" tab felt empty/unreadable). */
+.trace-output-block {
+  margin: 0.6rem 0 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.55);
+  font-size: 0.82rem;
+  color: #e2e8f0;
+  line-height: 1.55;
+}
+.trace-output-details { margin: 0.7rem 0 0; }
+.trace-output-details-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 0.4rem; }
+.trace-output-detail-row {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  align-items: baseline;
+  gap: 0.5rem 0.7rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.5);
+  margin-bottom: 0.4rem;
+}
+.trace-output-detail-tkr { font-weight: 700; font-size: 0.9rem; color: #f8fafc; font-variant-numeric: tabular-nums; }
+.trace-output-detail-verdict { font-weight: 600; font-size: 0.78rem; }
+.trace-output-detail-score { font-size: 0.74rem; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.trace-output-detail-sum { font-size: 0.76rem; color: #cbd5e1; line-height: 1.45; }
+
+/* Rendered markdown inside the trace drawer (analyst output summaries are
+   markdown reports — tables, headings, lists). Style them for the dark theme
+   so the "Weighting -> Output" blob is actually readable, not a raw wall. */
+.trace-markdown { font-size: 0.8rem; color: #e2e8f0; line-height: 1.6; }
+.trace-markdown h1, .trace-markdown h2, .trace-markdown h3, .trace-markdown h4 {
+  margin: 0.6rem 0 0.35rem;
+  line-height: 1.3;
+  color: #f8fafc;
+}
+.trace-markdown h1 { font-size: 1rem; }
+.trace-markdown h2 { font-size: 0.92rem; }
+.trace-markdown h3 { font-size: 0.86rem; }
+.trace-markdown p { margin: 0.4rem 0; }
+.trace-markdown ul, .trace-markdown ol { margin: 0.4rem 0; padding-left: 1.2rem; }
+.trace-markdown li { margin: 0.15rem 0; }
+.trace-markdown strong { color: #f8fafc; font-weight: 700; }
+.trace-markdown a { color: var(--accent, #38bdf8); }
+.trace-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78em;
+  background: rgba(148, 163, 184, 0.16);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+.trace-markdown blockquote {
+  margin: 0.5rem 0;
+  padding: 0.3rem 0.7rem;
+  border-left: 3px solid rgba(148, 163, 184, 0.4);
+  color: #cbd5e1;
+}
+/* GFM tables: the data-quality flag tables render here. */
+.trace-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.74rem;
+}
+.trace-markdown th, .trace-markdown td {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.trace-markdown th { background: rgba(148, 163, 184, 0.14); color: #f1f5f9; font-weight: 700; }
+.trace-markdown tr:nth-child(even) td { background: rgba(148, 163, 184, 0.06); }
 
 /* Sources */
 .trace-sources { margin: 0; padding-left: 1.1rem; }
@@ -2868,7 +2957,7 @@ body {
   overflow: visible;
 }
 .price-chart .chart-grid {
-  stroke: rgba(148, 163, 184, 0.12);
+  stroke: rgba(148, 163, 184, 0.28);
   stroke-width: 1;
 }
 .price-chart .chart-axis {

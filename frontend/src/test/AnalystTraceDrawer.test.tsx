@@ -81,6 +81,35 @@ describe('AnalystTraceDrawer', () => {
     expect(out.textContent).toContain('score 82');
   });
 
+  it('renders the per-ticker breakdown from output.details', () => {
+    // Regression: the actual per-ticker score/verdict/summary lived in
+    // output.details.results but was NEVER rendered, so the Weighting -> Output
+    // tab felt empty / unreadable. Now it shows a readable per-ticker grid.
+    const trace = makeTrace({
+      output: {
+        verdict: 'BULLISH',
+        score: 75,
+        summary: 'Wide moat, clean balance sheet.',
+        details: {
+          results: {
+            AAPL: { score: 82, verdict: 'BULLISH', summary: 'Strong margins.' },
+            MSFT: { score: 68, verdict: 'NEUTRAL', summary: 'Fair value.' },
+          },
+        },
+      },
+    });
+    render(<AnalystTraceDrawer traces={[trace]} analystId={'fundamental'} onClose={vi.fn()} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('trace-tab-weighting'));
+    expect(screen.getByTestId('trace-output-details')).toBeInTheDocument();
+    expect(screen.getByText('Per-ticker breakdown')).toBeInTheDocument();
+    // Both tickers surface with their verdict + score.
+    const rows = screen.getAllByTestId('trace-output-details').length;
+    expect(rows).toBe(1);
+    expect(screen.getByText('AAPL')).toBeInTheDocument();
+    expect(screen.getByText('MSFT')).toBeInTheDocument();
+    expect(screen.getByText('Strong margins.')).toBeInTheDocument();
+  });
+
   it('lists every analyzed source on the Sources tab', () => {
     render(
       <AnalystTraceDrawer traces={[makeTrace()]} analystId={'fundamental'} onClose={vi.fn()} onSelect={vi.fn()} />

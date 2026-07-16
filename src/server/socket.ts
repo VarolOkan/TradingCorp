@@ -101,6 +101,9 @@ class AnalysisSocketServer {
       socket.emit('analysis_complete', {
         ...result,
         ...normalized,
+        // Honest signal: when mock data is globally disabled and the run had no
+        // live sources, the output is empty (not fabricated). The UI shows a banner.
+        mockDisabled: isMockDisabled(),
         timestamp: new Date().toISOString()
       });
       

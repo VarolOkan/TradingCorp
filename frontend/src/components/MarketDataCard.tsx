@@ -135,7 +135,7 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
   const [news, setNews] = useState<NewsResult | null>(null);
   const [newsErr, setNewsErr] = useState<string | null>(null);
   // Chart studies toggle (analysis-grade overlays).
-  const [studies, setStudies] = useState<Partial<Record<StudyId, boolean>>>({ sma: true, bb: true });
+  const [studies, setStudies] = useState<Partial<Record<StudyId, boolean>>>({ sma: true, bb: true, rsi: true });
 
   // Quote fetch (only when Quote tab active, but cheap — fetch on mount).
   useEffect(() => {

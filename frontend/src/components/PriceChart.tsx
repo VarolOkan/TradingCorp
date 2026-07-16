@@ -46,7 +46,11 @@ export interface PriceChartProps {
 
 const MARGIN = { top: 8, right: 64, bottom: 22, left: 8 };
 const VOLUME_RATIO = 0.16; // fraction of (price+volume) given to volume
-const RSI_H = 56; // fixed RSI sub-pane height when enabled
+// RSI sub-pane takes a proportional share of the chart height (clamped) so it
+// is large enough to read closely. Tuned up from the old fixed 56px.
+const RSI_RATIO = 0.26;
+const RSI_MIN_H = 72;
+const RSI_MAX_H = 180;
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -186,7 +190,7 @@ export function PriceChart({
     ema: studies?.ema ?? false,
     bb: studies?.bb ?? true,
     vwap: studies?.vwap ?? false,
-    rsi: studies?.rsi ?? false,
+    rsi: studies?.rsi ?? true,
   };
   const showRsi = enabled.rsi;
 
@@ -223,7 +227,10 @@ export function PriceChart({
 
   const innerW = Math.max(10, width - MARGIN.left - MARGIN.right);
   // Height partition: price pane gets the remainder after volume + (optional) RSI.
-  const rsiH = showRsi ? RSI_H : 0;
+  // RSI takes a proportional share (clamped) so it's large enough to inspect closely.
+  const rsiH = showRsi
+    ? Math.max(RSI_MIN_H, Math.min(RSI_MAX_H, Math.round(height * RSI_RATIO)))
+    : 0;
   const volH = Math.floor((height - rsiH - MARGIN.top - MARGIN.bottom) * VOLUME_RATIO);
   const priceH = Math.floor(height - rsiH - MARGIN.top - MARGIN.bottom - volH);
   const innerH = priceH + volH + rsiH;

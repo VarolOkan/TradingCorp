@@ -16,6 +16,7 @@
 import type { AgentState, AnalystTrace } from '../../types/financial-analysis';
 import type { AnalystDef, LogicSpec, AnalystTuning } from '../../types/registry';
 import { stringToSeed, seededRandom, type NodeSurface } from './shared';
+import { isMockDisabled } from './mockMode';
 
 export type { NodeSurface };
 
@@ -68,6 +69,7 @@ export async function declarativeHandler(
   def: AnalystDef,
   _tuning?: AnalystTuning,
 ): Promise<AgentState> {
+  const mockDisabled = isMockDisabled();
   let updatedState = node.updateStep(state, `${def.id}_start`);
   node.emitProgress(updatedState, 'analyst:start', def.id as any, { stage: def.stage });
 
@@ -139,6 +141,11 @@ export async function declarativeHandler(
       summary: first?.summary ?? logic.summaryTemplate ?? 'declarative',
       details: { results },
     },
+    // Honest signal when mock data is globally disabled: the output reflects NO
+    // real data, so we must not let it read as a genuine analysis.
+    notes: mockDisabled
+      ? [`mock data disabled (DISABLE_MOCK_DATA): no live source configured for ${def.id} — output is empty, not fabricated`]
+      : undefined,
   };
 
   // Attach results to messages[].data on the declared output channels.

@@ -21,18 +21,19 @@ function makeBars(n: number, start = 100) {
 }
 
 describe('PriceChart analysis-grade overlays', () => {
-  it('renders SMA + Bollinger overlays by default (studies sma+bb on)', () => {
+  it('renders SMA + Bollinger + RSI overlays by default (studies sma+bb+rsi on)', () => {
     render(<PriceChart bars={makeBars(120)} />);
     expect(screen.getByTestId('indicator-sma20')).toBeTruthy();
     expect(screen.getByTestId('indicator-sma50')).toBeTruthy();
     expect(screen.getByTestId('indicator-sma200')).toBeTruthy();
     expect(screen.getByTestId('indicator-bbu')).toBeTruthy();
     expect(screen.getByTestId('indicator-bbl')).toBeTruthy();
-    // EMA/VWAP/RSI off by default
+    // RSI is ON by default (user wants it visible without toggling).
+    expect(screen.getByTestId('indicator-rsi')).toBeTruthy();
+    expect(screen.getByTestId('rsi-pane')).toBeTruthy();
+    // EMA/VWAP still off by default
     expect(screen.queryByTestId('indicator-ema12')).toBeNull();
     expect(screen.queryByTestId('indicator-vwap')).toBeNull();
-    expect(screen.queryByTestId('indicator-rsi')).toBeNull();
-    expect(screen.queryByTestId('rsi-pane')).toBeNull();
   });
 
   it('renders EMA + VWAP + RSI when those studies are enabled', () => {

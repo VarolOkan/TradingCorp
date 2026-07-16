@@ -9,12 +9,25 @@
 // Styled dark/glass to match the rest of the app (see index.css .trace-drawer*).
 
 import { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { AnalystTrace } from '../../types';
 import type { AnalystId } from './analysts';
 import { analystById } from './analysts';
 import type { GetAnalystFlavorsResponse } from '../../api/analystFlavorsClient';
 
 type Tab = 'instructions' | 'data' | 'weighting' | 'sources';
+
+/** Map a verdict label to a color class (reuses the global .verdict-* palette). */
+function verdictClass(v: string | null | undefined): string {
+  if (!v) return '';
+  const s = v.toUpperCase();
+  if (s.includes('APPROVE') || s.includes('BULLISH') || s.includes('POSITIVE') || s.includes('EDGE'))
+    return 'verdict-bullish';
+  if (s.includes('REJECT') || s.includes('BEARISH') || s.includes('NEGATIVE') || s.includes('THIN'))
+    return 'verdict-bearish';
+  return 'verdict-neutral';
+}
 
 /** A drill path: analyst -> ticker -> datum, for traceability breadcrumbs. */
 export interface TraceBreadcrumb {
@@ -337,12 +350,46 @@ export function AnalystTraceDrawer({
                 })}
               </ol>
               <div className="trace-output" data-testid="trace-output">
-                <span className="trace-output-verdict">{trace.output.verdict ?? '—'}</span>
+                <span className={`trace-output-verdict ${verdictClass(trace.output.verdict)}`}>
+                  {trace.output.verdict ?? '—'}
+                </span>
                 {typeof trace.output.score === 'number' && (
                   <span className="trace-output-score">score {trace.output.score}</span>
                 )}
               </div>
-              <p className="trace-output-summary">{trace.output.summary}</p>
+              {trace.output.summary && (
+                <div className="trace-output-block trace-markdown" data-testid="trace-output-summary">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{trace.output.summary}</ReactMarkdown>
+                </div>
+              )}
+              {(() => {
+                const details = trace.output.details as
+                  | { results?: Record<string, { score: number; verdict: string; summary: string }> }
+                  | undefined;
+                const results = details?.results;
+                if (!results || Object.keys(results).length === 0) return null;
+                return (
+                  <div className="trace-output-details" data-testid="trace-output-details">
+                    <div className="trace-output-details-head">Per-ticker breakdown</div>
+                    {Object.entries(results).map(([tkr, r]) => (
+                      <div key={tkr} className="trace-output-detail-row">
+                        <span className="trace-output-detail-tkr">{tkr}</span>
+                        <span className={`trace-output-detail-verdict ${verdictClass(r.verdict)}`}>
+                          {r.verdict}
+                        </span>
+                        {typeof r.score === 'number' && (
+                          <span className="trace-output-detail-score">{r.score}</span>
+                        )}
+                        {r.summary && (
+                          <span className="trace-output-detail-sum">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.summary}</ReactMarkdown>
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </section>
           )}
 

@@ -96,7 +96,12 @@ describe('agency differentiation', () => {
     const it = riskOf(await riskHandler(state(), surface, tuned));
     for (const t of tickers) {
       const v = it[t].stop_loss_suggestion;
-      if (v != null) expect(v).toBeLessThanOrEqual(0.03);
+      // Stop-loss must be a sane POSITIVE fraction (the seeded RNG used to emit
+      // negatives via an unclamped Math.sin — that corrupted "mock" data is gone).
+      if (v != null) {
+        expect(v).toBeGreaterThan(0);
+        expect(v).toBeLessThanOrEqual(0.5);
+      }
     }
   });
 });

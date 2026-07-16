@@ -133,6 +133,14 @@ export function ResultsPanel({ result, agencyId, onResultSaved }: ResultsPanelPr
         )}
       </header>
 
+      {result.mockDisabled && (
+        <div className="mock-disabled-banner" role="alert" data-testid="mock-disabled-banner">
+          ⚠ Mock data disabled (DISABLE_MOCK_DATA). No live source is configured, so the
+          analyst outputs below are <strong>empty — not real and not fabricated</strong>.
+          Configure a live data source (API key / endpoint) to produce genuine analysis.
+        </div>
+      )}
+
       {(() => {
         // Phase B: prefer the backend-computed thesisSummary when present
         // (single source of truth). Fall back to deriving rows from

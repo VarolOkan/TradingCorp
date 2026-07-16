@@ -33,6 +33,7 @@ import { registerApiDocsRoutes } from './api-docs-routes';
 import { registerNewsRoutes } from './news-routes';
 import { registerScreenerRoutes } from './screener-routes';
 import { buildThesisSummary } from './thesis-summary';
+import { isMockDisabled } from '../registry/logic/mockMode';
 
 /**
  * Socket.IO server for real-time financial analysis updates
@@ -359,6 +360,9 @@ class AnalysisServer {
       socket.emit('analysis_complete', {
         ...result,
         ...this.normalizeResult(result),
+        // Honest signal: when mock data is globally disabled and the run had no
+        // live sources, the output is empty (not fabricated). The UI shows a banner.
+        mockDisabled: isMockDisabled(),
         timestamp: new Date().toISOString()
       });
       

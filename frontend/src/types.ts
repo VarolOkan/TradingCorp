@@ -48,6 +48,12 @@ export interface AnalysisResult {
    */
   dataHealth?: DataHealth | null;
   /**
+   * True when the run executed with DISABLE_MOCK_DATA set AND had no live
+   * sources — so the output is EMPTY (not fabricated). The UI shows a banner
+   * so the user can never mistake it for a real analysis.
+   */
+  mockDisabled?: boolean;
+  /**
    * Phase B — backend-computed scannable thesis grid (decision + per-analyst
    * verdict/score). Preferred by the results panel; absent in legacy payloads
    * (frontend falls back to deriving rows from analystTraces, then the raw
