@@ -6,6 +6,10 @@ import { postReport, reportViewUrl, type ReportFiles } from '../api/reportClient
 
 export interface ResultsPanelProps {
   result: AnalysisResult | null;
+  /** Selected agency for THIS run — tagged onto the saved report so the
+   *  calendar groups/filters by the agency the user actually analyzed with
+   *  (not the backend's default). */
+  agencyId?: string;
   /** Called after a successful Save/export so the parent can mark the run saved. */
   onResultSaved?: () => void;
 }
@@ -88,7 +92,7 @@ function truncate(text: string, max: number): string {
   return text.slice(0, max).replace(/\s+\S*$/, '');
 }
 
-export function ResultsPanel({ result, onResultSaved }: ResultsPanelProps) {
+export function ResultsPanel({ result, agencyId, onResultSaved }: ResultsPanelProps) {
   const [exporting, setExporting] = useState(false);
   const [reportFiles, setReportFiles] = useState<ReportFiles | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -106,7 +110,7 @@ export function ResultsPanel({ result, onResultSaved }: ResultsPanelProps) {
       // The socket payload already carries the normalized fields the backend's
       // report builder consumes (decisions, riskAssessments, analystTraces,
       // dataHealth, company_name, ...). POST it as-is.
-      const res = await postReport(result as any);
+      const res = await postReport(result as any, agencyId ? { agencyId } : undefined);
       if (!res.ok) throw new Error(res.error || 'Report generation failed.');
       setReportFiles(res.files);
       onResultSaved?.();

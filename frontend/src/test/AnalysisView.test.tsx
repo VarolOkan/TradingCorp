@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { AnalysisView } from '../components/AnalysisView';
 import type { Socket } from 'socket.io-client';
 import { AGENCIES } from '../components/analysts/agencies';
+import { postReport } from '../api/reportClient';
 // ResultsPanel's Save button calls postReport (a real network request). Mock
 // it to resolve so the "saved → no prompt" path is exercisable in jsdom.
 vi.mock('../api/reportClient', () => ({
@@ -207,6 +208,29 @@ describe('AnalysisView — agency-switch unsaved-results guard', () => {
     // The Save button MUST be back — a fresh panel, not the stale saved state.
     expect(screen.getByTestId('export-report')).toBeInTheDocument();
     expect(screen.queryByTestId('report-links')).toBeNull();
+  });
+
+  it('saves a Medium-term report under MEDIUM-term (not long-term)', async () => {
+    // Regression: the selected agency never reached postReport, so every saved
+    // report was filed under the backend default "long-term" — even Medium-term
+    // runs. Selecting Medium + saving must tag the report with medium-term.
+    const postSpy = vi.mocked(postReport);
+    postSpy.mockClear();
+    const socket = recordingSocket();
+    render(<AnalysisView socket={socket as any} connected={true} />);
+
+    // Switch the agency dropdown to Medium term.
+    const agency = screen.getByLabelText(/Select analysis agency/i) as HTMLSelectElement;
+    fireEvent.change(agency, { target: { value: 'medium-term' } });
+
+    // Complete a run and save it.
+    act(() => { socket._fire('analysis_complete', COMPLETE); });
+    fireEvent.click(screen.getByTestId('export-report'));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+
+    // The report was tagged with the SELECTED agency, not the default.
+    const meta = postSpy.mock.calls[0]?.[1] as { agencyId?: string } | undefined;
+    expect(meta?.agencyId).toBe('medium-term');
   });
 });
 

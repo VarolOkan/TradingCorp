@@ -386,7 +386,7 @@ export function AnalysisView({
         </button>
         <div className="collapsible" aria-expanded={resultsOpen}>
           <div className="collapsible-inner">
-            <ResultsPanel key={runId} result={result} onResultSaved={() => setSaved(true)} />
+            <ResultsPanel key={runId} agencyId={agencyId} result={result} onResultSaved={() => setSaved(true)} />
           </div>
         </div>
       </div>

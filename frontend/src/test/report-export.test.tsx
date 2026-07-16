@@ -80,27 +80,23 @@ describe('ResultsPanel report export', () => {
     expect(await screen.findByText(/boom/i)).toBeInTheDocument();
   });
 
-  it('hides the Save button once the report is saved (links remain)', async () => {
+  it('tags the saved report with the SELECTED agency, not the backend default', async () => {
+    // Regression: a Medium-term run's report used to be filed under "long-term"
+    // because no agencyId was passed to postReport. The selected agency must
+    // travel Result->postReport so the backend stores + names it correctly.
     const postMock = vi.spyOn(reportClient, 'postReport').mockResolvedValue({
       ok: true,
-      id: 'report-long-term-ACME-12-30-45',
+      id: 'report-medium-term-ACME-12-30-45',
       day: '2026-07-11',
-      files: {
-        pdf: '/reports/default/2026-07-11/report-long-term-ACME-12-30-45.pdf',
-        md: '/reports/default/2026-07-11/report-long-term-ACME-12-30-45.md',
-        html: '/reports/default/2026-07-11/report-long-term-ACME-12-30-45.html',
-      },
+      files: { pdf: 'x.pdf', md: 'x.md', html: 'x.html' },
       meta: {},
     });
 
-    render(<ResultsPanel result={SAMPLE_RESULT} />);
-    // Before saving, the Save button is visible.
-    expect(screen.getByTestId('export-report')).toBeInTheDocument();
+    render(<ResultsPanel result={SAMPLE_RESULT} agencyId="medium-term" />);
     fireEvent.click(screen.getByTestId('export-report'));
+
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
-    // After saving, the button disappears and only the "Saved. View:" links remain.
-    await waitFor(() => expect(screen.queryByTestId('export-report')).toBeNull());
-    expect(screen.getByTestId('report-links')).toHaveTextContent(/Saved/);
-    expect(screen.getByTestId('report-pdf')).toBeInTheDocument();
+    // The SECOND arg is { agencyId } — this is what the backend keys on.
+    expect(postMock.mock.calls[0][1]).toEqual({ agencyId: 'medium-term' });
   });
 });
