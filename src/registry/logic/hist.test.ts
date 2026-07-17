@@ -3,7 +3,7 @@
 // bundle is deterministic, structurally valid, and that greeks are internally
 // consistent with the chain (BS(mid) ≈ mid, since both come from greeks.ts).
 
-import { generateMockBundle, fetchHistoricalBundle, fetchOptionChain, parseYahooOptions } from './hist';
+import { generateMockBundle, fetchHistoricalBundle, fetchOptionChain, parseYahooOptions, parseCboeOptions, resolveLiveOptionsBundle } from './hist';
 import { bsPrice } from './greeks';
 
 describe('hist — mock bundle structure', () => {
@@ -272,3 +272,147 @@ describe('hist — options: real (delayed) Yahoo preferred over MOCK', () => {
     expect(res.note).toContain('real quote');
   });
 });
+
+describe('parseCboeOptions (free delayed feed)', () => {
+  // Mirrors the REAL CBOE shape: top-level underlying quote (current_price),
+  // IV as a DECIMAL (0.56 = 56%), and per-row greeks that are already correct.
+  const payload = {
+    timestamp: '2026-07-17 17:04:22',
+    data: {
+      symbol: 'NVDA',
+      current_price: 205.67,
+      close: 205.67,
+      prev_day_close: 207.4,
+      options: [
+        // ATM call: delta should stay ~0.61 (NOT snap to 1.0).
+        { option: 'NVDA260717C00205000', bid: 3.9, ask: 4.1, iv: 0.5612, open_interest: 900, volume: 120, delta: 0.6139, gamma: 0.1618, vega: 0.13, theta: -0.42, rho: 0.02 },
+        // Deep-ITM call: delta ~0.98 is legitimately high but comes from CBOE.
+        { option: 'NVDA260717C00197500', bid: 8.05, ask: 8.3, iv: 0.7709, open_interest: 3745, volume: 8570, delta: 0.9822, gamma: 0.011, vega: 0.0019, theta: -0.0254, rho: 0.0 },
+        // OTM put on a later expiry.
+        { option: 'NVDA260720P00200000', bid: 2.1, ask: 2.3, iv: 0.58, open_interest: 200, volume: 9, delta: -0.31, gamma: 0.05, vega: 0.09, theta: -0.2, rho: -0.01 },
+      ],
+    },
+  };
+
+  it('reads the real underlying spot from current_price (not the median strike)', () => {
+    const r = parseCboeOptions('NVDA', payload);
+    expect(r).not.toBeNull();
+    if (!r) return;
+    expect(r.underlying_price).toBeCloseTo(205.67, 2);
+    expect(r.quotes.every((q) => q.underlying_price === 205.67)).toBe(true);
+  });
+
+  it('decodes OCC symbols into expiry/strike/right and maps bid/ask/iv', () => {
+    const r = parseCboeOptions('NVDA', payload);
+    expect(r).not.toBeNull();
+    if (!r) return;
+    expect(r.source).toBe('cboe');
+    expect(r.quotes.length).toBe(3);
+    expect(r.expiries).toEqual(['2026-07-17', '2026-07-20']);
+    const call = r.quotes.find((q) => q.type === 'C' && q.strike === 205);
+    expect(call).toBeDefined();
+    expect(call!.bid).toBe(3.9);
+    expect(call!.ask).toBe(4.1);
+    // CBOE reports IV as a DECIMAL already — must NOT be divided by 100.
+    expect(call!.iv).toBeCloseTo(0.5612, 4);
+  });
+
+  it('uses CBOE published greeks directly — ATM delta stays ~0.5, not pinned to ±1', () => {
+    const r = parseCboeOptions('NVDA', payload);
+    expect(r).not.toBeNull();
+    if (!r) return;
+    const atm = r.greeks.find((g) => g.type === 'C' && g.strike === 205);
+    const itm = r.greeks.find((g) => g.type === 'C' && g.strike === 197.5);
+    expect(atm!.delta).toBeCloseTo(0.6139, 3); // from CBOE, not recomputed to 1.0
+    expect(itm!.delta).toBeCloseTo(0.9822, 3);
+    // Smooth: ATM delta strictly below the deeper-ITM delta.
+    expect(atm!.delta).toBeLessThan(itm!.delta);
+    expect(atm!.gamma).toBeCloseTo(0.1618, 4);
+  });
+
+  it('BS-fills greeks only when CBOE omits them (missing delta/gamma/etc.)', () => {
+    const partial = {
+      data: {
+        current_price: 100,
+        options: [
+          // No greeks at all → must be Black-Scholes filled, ATM delta ~0.5.
+          { option: 'AAA260717C00100000', bid: 4, ask: 4.2, iv: 0.4, open_interest: 10, volume: 1 },
+        ],
+      },
+    };
+    const r = parseCboeOptions('AAA', partial);
+    expect(r).not.toBeNull();
+    if (!r) return;
+    const g = r.greeks[0];
+    expect(g.delta).toBeGreaterThan(0.3);
+    expect(g.delta).toBeLessThan(0.7); // ATM-ish, smooth — NOT 1.0
+    expect(g.gamma).toBeGreaterThan(0);
+  });
+
+  it('treats a 0 IV (illiquid deep-ITM) as missing so vol-surface is not poisoned', () => {
+    const zeroIv = {
+      data: {
+        current_price: 205.67,
+        options: [
+          { option: 'NVDA260717C00190000', bid: 15, ask: 15.4, iv: 0, open_interest: 5, volume: 0, delta: 0.99, gamma: 0.003, vega: 0.001, theta: -0.01, rho: 0 },
+        ],
+      },
+    };
+    const r = parseCboeOptions('NVDA', zeroIv);
+    expect(r).not.toBeNull();
+    if (!r) return;
+    expect(r.quotes[0].iv).toBeGreaterThan(0); // 0 replaced with a sane default
+  });
+
+  it('uses CBOE real data in resolveLiveOptionsBundle when Polygon is entitlement-blocked', async () => {
+    const fakeFetch = async (url: string) => {
+      if (url.includes('api.massive.com')) {
+        return { ok: false, status: 401, text: async () => JSON.stringify({ status: 'NOT_AUTHORIZED' }), json: async () => ({}) } as any;
+      }
+      if (url.includes('cdn.cboe.com')) {
+        const body = { timestamp: 'x', data: { current_price: 205.67, options: [{ option: 'NVDA260717C00205000', bid: 3.9, ask: 4.1, iv: 0.5612, open_interest: 900, volume: 120, delta: 0.6139, gamma: 0.1618, vega: 0.13, theta: -0.42, rho: 0.02 }] } };
+        return { ok: true, status: 200, text: async () => JSON.stringify(body), json: async () => body } as any;
+      }
+      if (url.includes('query') || url.includes('finance') || url.includes('yahoo')) {
+        return { ok: false, status: 429, text: async () => 'Too Many Requests', json: async () => ({}) } as any;
+      }
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}) } as any;
+    };
+    const bundle = await resolveLiveOptionsBundle('NVDA', {}, { fetchFn: fakeFetch as any });
+    // The OPTION CHAIN is real CBOE data (source reflects the chain).
+    expect(bundle.source).toBe('cboe');
+    expect(bundle.note).toContain('CBOE');
+    expect(bundle.option_chain.length).toBeGreaterThan(0);
+    // Price BARS fell back to mock (Yahoo blocked in this stub), so the
+    // overall bundle is flagged mock — honest: chain real, bars synthetic.
+    expect(bundle.mock).toBe(true);
+  });
+
+  it('returns null on empty/unparseable payload', () => {
+    expect(parseCboeOptions('NVDA', {})).toBeNull();
+    expect(parseCboeOptions('NVDA', { data: { options: [] } })).toBeNull();
+  });
+});
+
+describe('fetchOptionChain CBOE fallback', () => {
+  it('uses CBOE real data when a Massive key is set but the live call is entitlement-blocked (401)', async () => {
+    const fakeFetch = async (url: string) => {
+      if (url.includes('api.massive.com')) {
+        return { ok: false, status: 401, text: async () => JSON.stringify({ status: 'NOT_AUTHORIZED', message: 'not entitled' }), json: async () => ({ status: 'NOT_AUTHORIZED' }) } as any;
+      }
+      if (url.includes('cdn.cboe.com')) {
+        return {
+          ok: true, status: 200,
+          text: async () => JSON.stringify({ timestamp: 'x', data: { options: [{ option: 'NVDA260717C00002500', bid: 200.5, ask: 205.85, iv: 35.0, open_interest: 17, volume: 0, delta: 1.0 }] } }),
+          json: async () => ({ timestamp: 'x', data: { options: [{ option: 'NVDA260717C00002500', bid: 200.5, ask: 205.85, iv: 35.0, open_interest: 17, volume: 0, delta: 1.0 }] } }),
+        } as any;
+      }
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}) } as any;
+    };
+    const res = await fetchOptionChain('NVDA', { apiKey: 'some-key', fetchFn: fakeFetch as any });
+    expect(res.source).toBe('cboe'); // real delayed data, NOT mock
+    expect(res.quotes.length).toBeGreaterThan(0);
+    expect(res.note).toContain('CBOE');
+  });
+});
+

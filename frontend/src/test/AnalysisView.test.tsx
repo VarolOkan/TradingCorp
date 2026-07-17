@@ -20,6 +20,14 @@ vi.mock('../api/reportClient', () => ({
   listReports: vi.fn(),
 }));
 
+// getQuote drives the no-run preview validation. Controlled per-test via the
+// exported handle so we can simulate a found ticker vs a not-found one.
+const getQuoteMock = vi.fn(async (s: string) => {
+  if (s === 'NOTREAL') throw new Error('not found');
+  return { symbol: s, name: `${s} Inc`, price: 100, note: undefined };
+});
+vi.mock('../api/quoteClient', () => ({ getQuote: (...a: any[]) => getQuoteMock(...a) }));
+
 // Screener's "Run" calls getScreener. Mock a single promising ticker so the
 // "→ Analyze" button is rendered and exercisable.
 vi.mock('../api/screenerClient', () => ({
@@ -302,5 +310,72 @@ describe('AnalysisView — screener "→ Analyze" fills input, runs, collapses',
     // ...but it must NOT start an analysis. The user reviews/edits and then
     // clicks [Analyze] themselves. So "Analyzing…" must NOT appear.
     expect(screen.queryByText('Analyzing…')).toBeNull();
+  });
+});
+
+// --- Phase 7.5: no-run chart preview ---
+describe('AnalysisView — no-run chart preview', () => {
+  beforeEach(() => {
+    getQuoteMock.mockImplementation(async (s: string) => {
+      if (s === 'NOTREAL') throw new Error('not found');
+      return { symbol: s, name: `${s} Inc`, price: 100, note: undefined };
+    });
+  });
+
+  it('clicking a Watchlist chip previews the chart WITHOUT starting the run', async () => {
+    render(<AnalysisView socket={fakeSocket()} connected={true} />);
+    const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
+
+    fireEvent.change(screen.getByTestId('watchlist-input'), { target: { value: 'NVDA' } });
+    fireEvent.click(screen.getByTestId('watchlist-add-btn'));
+    fireEvent.click(screen.getByTestId('watchlist-open-NVDA'));
+
+    // The chart card appears immediately...
+    await waitFor(() => expect(screen.getByTestId('market-card-NVDA')).toBeTruthy());
+    // ...the field is filled...
+    expect(input.value).toBe('NVDA');
+    // ...but the agency run did NOT start (no "Analyzing…").
+    expect(screen.queryByText('Analyzing…')).toBeNull();
+  });
+
+  it('leaving the Ticker symbols field previews the chart (onBlur)', async () => {
+    render(<AnalysisView socket={fakeSocket()} connected={true} />);
+    const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'AAPL' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(screen.getByTestId('market-card-AAPL')).toBeTruthy());
+    expect(screen.queryByText('Analyzing…')).toBeNull();
+  });
+
+  it('a not-found ticker shows NOTHING (no card, no run)', async () => {
+    render(<AnalysisView socket={fakeSocket()} connected={true} />);
+    const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'NOTREAL' } });
+    fireEvent.blur(input);
+
+    // Resolve the async validation, then assert no card appeared.
+    await waitFor(() => expect(getQuoteMock).toHaveBeenCalled());
+    expect(screen.queryByTestId('market-card-NOTREAL')).toBeNull();
+    expect(screen.queryByText('Analyzing…')).toBeNull();
+  });
+
+  it('[Analyze] starts the run (preview card is now run-owned)', async () => {
+    render(<AnalysisView socket={fakeSocket()} connected={true} />);
+    const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
+
+    // Preview first via blur.
+    fireEvent.change(input, { target: { value: 'AAPL' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(screen.getByTestId('market-card-AAPL')).toBeTruthy());
+
+    // Now run — the agency work starts.
+    fireEvent.click(screen.getByText('Analyze'));
+    expect(screen.getByText('Analyzing…')).toBeTruthy();
+    // The card persists (now driven by the run's tickers, not the preview) — and
+    // there is exactly ONE AAPL card, not a preview + run duplicate.
+    expect(screen.getAllByTestId('market-card-AAPL').length).toBe(1);
   });
 });

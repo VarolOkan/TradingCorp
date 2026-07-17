@@ -332,12 +332,25 @@ function EquityView({ ingested }: { ingested: Record<string, any> }) {
 
 function OptionsView({ optionsData }: { optionsData: Record<string, any> }) {
   const underlying = optionsData.underlying_symbol ?? optionsData.underlyingSymbol ?? '—';
+  // Honest provenance: map the chain source code to a human label so the
+  // side-pane tells the truth (real delayed vs live vs synthetic mock), and
+  // surface the backend note (e.g. Massive 401 entitlement story).
+  const SRC_LABEL: Record<string, string> = {
+    polygon: 'LIVE · Polygon/Massive (near real-time)',
+    cboe: 'DELAYED · CBOE free delayed feed (real bid/ask)',
+    yahoo: 'DELAYED · Yahoo tokenless (real)',
+    mock: 'MOCK · deterministic synthetic (no live feed)',
+  };
+  const srcLabel = optionsData.source ? (SRC_LABEL[optionsData.source] ?? String(optionsData.source)) : null;
   return (
     <>
       <dl className="trace-fields">
         <div className="trace-field"><dt>Underlying</dt><dd>{String(underlying)}</dd></div>
-        {optionsData.source && (
-          <div className="trace-field"><dt>Source</dt><dd>{String(optionsData.source)}</dd></div>
+        {srcLabel && (
+          <div className="trace-field"><dt>Option chain source</dt><dd data-testid="options-source-label">{srcLabel}</dd></div>
+        )}
+        {optionsData.note && (
+          <div className="trace-field"><dt>Note</dt><dd data-testid="options-source-note">{String(optionsData.note)}</dd></div>
         )}
         {optionsData.asOf && (
           <div className="trace-field"><dt>asOf</dt><dd>{String(optionsData.asOf)}</dd></div>

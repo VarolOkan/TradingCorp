@@ -267,6 +267,26 @@ describe('MarketDataCard (Phase M)', () => {
     expect(screen.queryByTestId('options-live-failed')).toBeNull();
   });
 
+  it('renders the CBOE delayed badge + real-bid/ask note when source is cboe', async () => {
+    // The "real bid/ask another way" path: a key may be set + Massive
+    // entitlement-blocked, but CBOE's free feed returns REAL delayed data.
+    // The badge must read DELAYED (real), not MOCK.
+    const cboeChain: OptionChainResult = {
+      ...chain,
+      source: 'cboe',
+      note: 'Delayed ~15-20 min — free CBOE delayed options feed (real bid/ask/IV).',
+      underlying_price: 207.4,
+    };
+    vi.spyOn(optionsClient, 'getOptionChain').mockResolvedValue(cboeChain);
+    render(<MarketDataCard symbol="NVDA" />);
+    fireEvent.click(screen.getByTestId('market-tab-options'));
+    await waitFor(() => expect(screen.getByTestId('options-chain-panes')).toBeInTheDocument());
+    expect(screen.getByTestId('options-source').textContent).toBe('DELAYED');
+    expect(screen.getByTestId('options-delay').textContent).toContain('CBOE (real bid/ask)');
+    // No misleading "no live feed" warning on a real delayed source.
+    expect(screen.queryByTestId('options-live-failed')).toBeNull();
+  });
+
   it('highlights the active (ATM, nearest-to-spot) row across both panes + center strike', async () => {
     vi.spyOn(optionsClient, 'getOptionChain').mockResolvedValue(chain);
     render(<MarketDataCard symbol="AAPL" />);

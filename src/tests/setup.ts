@@ -17,5 +17,10 @@ if (typeof globalThis.fetch === 'undefined' || (globalThis as any).__mockFetch__
   (globalThis as any).__mockFetch__ = true;
 }
 
-// Always install the rejection stub (overrides any real fetch in node env).
-(globalThis as any).fetch = noNetworkFetch;
+// Always install the rejection stub (overrides any real fetch in node env)...
+// EXCEPT when a test opts into real network via RUN_LIVE_CBOE=1 (the greeks
+// live-parity test actually hits the CBOE feed). Off by default so CI stays
+// hermetic/offline.
+if (process.env.RUN_LIVE_CBOE !== '1') {
+  (globalThis as any).fetch = noNetworkFetch;
+}

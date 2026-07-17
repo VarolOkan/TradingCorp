@@ -87,6 +87,26 @@ describe('RawDataDrawer', () => {
     expect(screen.getByTestId('options-json')).toHaveTextContent('AAPL');
   });
 
+  it('shows honest CBOE provenance + note in the Options side-pane', () => {
+    render(
+      <RawDataDrawer
+        dump={makeDump({
+          optionsData: {
+            underlying_symbol: 'NVDA',
+            source: 'cboe',
+            note: 'Delayed ~15-20 min — free CBOE delayed options feed (real bid/ask/IV).',
+            asOf: '2026-07-17T17:04:22Z',
+            option_chain: [{ strike: 2.5, type: 'call', bid: 200.5, ask: 205.85 }],
+          },
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('rawdata-tab-options'));
+    expect(screen.getByTestId('options-source-label')).toHaveTextContent('CBOE free delayed feed');
+    expect(screen.getByTestId('options-source-note')).toHaveTextContent('CBOE delayed options feed');
+  });
+
   it('shows an empty state when the dump has no annotations', () => {
     render(
       <RawDataDrawer

@@ -474,16 +474,18 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
                     <span
                       className={`history-src history-src-${opt.source}`}
                       data-testid="options-source"
-                      title={opt.note ?? (opt.source === 'polygon' ? 'Live option chain from Polygon' : opt.source === 'yahoo' ? 'Real (delayed) options chain from Yahoo' : 'No live feed — showing a deterministic mock chain')}
+                      title={opt.note ?? (opt.source === 'polygon' ? 'Live option chain from Polygon' : opt.source === 'cboe' ? 'Real (delayed) options chain from CBOE delayed feed' : opt.source === 'yahoo' ? 'Real (delayed) options chain from Yahoo' : 'No live feed — showing a deterministic mock chain')}
                     >
-                      {opt.source === 'polygon' ? 'LIVE' : opt.source === 'yahoo' ? 'DELAYED' : 'MOCK'}
+                      {opt.source === 'polygon' ? 'LIVE' : opt.source === 'cboe' ? 'DELAYED' : opt.source === 'yahoo' ? 'DELAYED' : 'MOCK'}
                     </span>
                     <span className="history-delay" data-testid="options-delay" title={opt.note ?? 'No live feed configured'}>
                       {opt.source === 'polygon'
                         ? 'near real-time · Polygon'
-                        : opt.source === 'yahoo'
-                          ? 'delayed ~15-20m · Yahoo (real)'
-                          : 'simulated · no live feed'}
+                        : opt.source === 'cboe'
+                          ? 'delayed ~15-20m · CBOE (real bid/ask)'
+                          : opt.source === 'yahoo'
+                            ? 'delayed ~15-20m · Yahoo (real)'
+                            : 'simulated · no live feed'}
                     </span>
                     {opt.expiries.length > 1 && (
                       <div className="options-expiries" data-testid="options-expiries">

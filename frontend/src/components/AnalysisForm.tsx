@@ -10,6 +10,8 @@ export interface AnalysisFormProps {
   value?: string;
   /** Called on every keystroke when controlled via `value`. */
   onChange?: (v: string) => void;
+  /** Called when the input loses focus (blur). Used for a no-run chart preview. */
+  onBlur?: (value: string) => void;
 }
 
 export function AnalysisForm({
@@ -19,6 +21,7 @@ export function AnalysisForm({
   onSessionChange,
   value,
   onChange,
+  onBlur,
 }: AnalysisFormProps) {
   // Internal fallback so the form still works when uncontrolled (no value prop).
   const [internal, setInternal] = useState('');
@@ -49,6 +52,7 @@ export function AnalysisForm({
           aria-label="Ticker symbols"
           disabled={running}
           onChange={(e) => setInput(e.target.value)}
+          onBlur={(e) => onBlur?.(e.target.value)}
         />
       </label>
 

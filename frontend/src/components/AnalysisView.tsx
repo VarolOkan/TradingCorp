@@ -10,6 +10,7 @@ import AnalystTraceDrawer from './analysts/AnalystTraceDrawer';
 import AnalystSettingsDialog from './AnalystSettingsDialog';
 import MarketDataCard from './MarketDataCard';
 import CompareView from './compare/CompareView';
+import { getQuote } from '../api/quoteClient';
 import ScreenerPanel from './ScreenerPanel';
 import WatchlistBar from './WatchlistBar';
 import { useAnalystRun } from '../hooks/useAnalystRun';
@@ -80,6 +81,40 @@ export function AnalysisView({
   // "→ Analyze" (and other surfaces) can drop a ticker into the field without
   // auto-submitting — the user reviews/edits it, then hits Analyze themselves.
   const [symbolInput, setSymbolInput] = useState('');
+  // Phase 7.5: a "preview" ticker set that fills the Chart/Quote/Options card
+  // IMMEDIATELY on (a) a Watchlist chip click or (b) leaving the Ticker symbols
+  // input — WITHOUT triggering the agency run. [Analyze] is still the only thing
+  // that starts the agents' work (wallTickers). The preview is validated first
+  // via a quote lookup; if the ticker isn't found, nothing is shown.
+  const [previewTickers, setPreviewTickers] = useState<string[]>([]);
+  const [previewChecking, setPreviewChecking] = useState(false);
+  // Validate a candidate symbol against the quote endpoint. Resolves to the
+  // upper-cased symbol if it exists, or null if not found / errored.
+  const resolvePreview = async (raw: string): Promise<string[]> => {
+    const syms = raw
+      .split(',')
+      .map((t) => t.trim().toUpperCase())
+      .filter((t) => t.length > 0);
+    if (syms.length === 0) return [];
+    setPreviewChecking(true);
+    try {
+      const found = await Promise.all(
+        syms.map(async (s) => {
+          try {
+            const q = await getQuote(s);
+            // A quote that resolved but carries a "no data" note is treated as
+            // not-found (e.g. unsupported symbol) — nothing shown.
+            return q && !q.note ? s : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      return found.filter((s): s is string => s !== null);
+    } finally {
+      setPreviewChecking(false);
+    }
+  };
   // Screener expand/collapse state, lifted so "→ Analyze" can collapse the
   // panel (after filling the input + starting the run).
   const [screenerOpen, setScreenerOpen] = useState(false);
@@ -201,6 +236,7 @@ export function AnalysisView({
   }
   const handleSubmit = (tickers: string[]) => {
     setWallTickers(tickers);
+    setPreviewTickers([]); // the run now owns the displayed card; drop the preview
     setOpenAnalyst(null);
     setSaved(false);
     setPendingAgency(null);
@@ -278,11 +314,11 @@ export function AnalysisView({
           <div className="collapsible-inner">
             <WatchlistBar
               // Clicking a watchlist chip drops the ticker into the Ticker symbols
-              // input box ONLY — it does NOT auto-run. The user reviews/edits the
-              // symbol and then clicks [Analyze] themselves. (Per request: fill the
-              // field, don't trigger the analysis.)
-              onOpen={(s) => { setSymbolInput(s); }}
-              onAnalyze={(s) => { setSymbolInput(s); }}
+              // input box AND immediately previews the Chart/Quote/Options card —
+              // the agents' work still waits for [Analyze]. The chart appears once
+              // the symbol is validated; if it isn't found, nothing shows.
+              onOpen={async (s) => { setSymbolInput(s); setPreviewTickers(await resolvePreview(s)); }}
+              onAnalyze={async (s) => { setSymbolInput(s); setPreviewTickers(await resolvePreview(s)); }}
             />
 
             <AnalysisForm
@@ -292,6 +328,10 @@ export function AnalysisView({
               onSessionChange={onSessionChange}
               value={symbolInput}
               onChange={setSymbolInput}
+              // Leaving the Ticker symbols field previews the chart for whatever
+              // was typed (validated first; not-found → nothing shown). This is a
+              // convenience preview only — [Analyze] still starts the agency run.
+              onBlur={async (v) => { setPreviewTickers(await resolvePreview(v)); }}
             />
 
             {/* Phase 6: Stock Screener — find the most promising tickers for the
@@ -309,10 +349,12 @@ export function AnalysisView({
 
       {/* Phase M: after a symbol is submitted, show a SINGLE unified market card
           (Chart / Quote / History / Options tabs) instead of three separate
-          panels. */}
-      {wallTickers.length > 0 && (
+          panels. The card also previews immediately on a Watchlist chip click or
+          leaving the Ticker symbols field (previewTickers) — that path does NOT
+          start the agency run; only [Analyze] populates wallTickers. */}
+      {(wallTickers.length > 0 || previewTickers.length > 0) && (
         <div className="market-row-wrap">
-          {wallTickers.length >= 2 && wallTickers.length <= 5 && (
+          {wallTickers.length > 0 && (
             <div className="compare-toggle-row" data-testid="compare-toggle-row">
               <button
                 type="button"
@@ -326,11 +368,13 @@ export function AnalysisView({
               <span className="compare-hint">Comparing {wallTickers.length} tickers</span>
             </div>
           )}
-          {compareMode ? (
+          {compareMode && wallTickers.length >= 2 && wallTickers.length <= 5 ? (
             <CompareView tickers={wallTickers} result={result} />
           ) : (
             <div className="market-row" data-testid="market-row">
-              {wallTickers.map((t) => (
+              {/* Prefer the run's tickers so a just-submitted [Analyze] instantly
+                  replaces the preview; otherwise show the previewed tickers. */}
+              {(wallTickers.length > 0 ? wallTickers : previewTickers).map((t) => (
                 <MarketDataCard
                   key={t}
                   symbol={t}

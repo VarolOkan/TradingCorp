@@ -2352,6 +2352,18 @@ body {
 .quote-error {
   color: #f87171;
 }
+/* Honest-but-not-alarming warning (e.g. Massive key set but entitlement-
+   blocked → CBOE fallback). Smaller + orange so it reads as a
+   soft note, not a loud error. */
+.quote-warn {
+  margin: 8px 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #f59e0b;
+  border-left: 3px solid #f59e0b;
+  padding: 4px 8px;
+  background: rgba(245, 158, 11, 0.08);
+}
 
 /* Phase I (enhanced Quote tab): session line, price banner, color cues. */
 .quote-session {

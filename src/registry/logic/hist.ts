@@ -480,6 +480,7 @@ export async function fetchPriceBars(
 export type OptionChainFetchFn = (url: string, headers?: Record<string, string>) => Promise<{
   ok: boolean;
   status: number;
+  text: () => Promise<string>;
   json: () => Promise<any>;
 }>;
 
@@ -498,8 +499,14 @@ function numOr(v: any, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** True when v is a real, finite number (CBOE occasionally sends null/NaN greeks). */
+function isFiniteNum(v: any): boolean {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n);
+}
+
 export interface OptionChainResult extends OptionChain {
-  source: 'polygon' | 'yahoo' | 'mock';
+  source: 'polygon' | 'yahoo' | 'cboe' | 'mock';
   note?: string;
 }
 
@@ -562,6 +569,145 @@ export function parseYahooOptions(ticker: string, payload: any): OptionChainResu
     source: 'yahoo',
     note: 'Delayed ~15-20 min — tokenless Yahoo options chain (real quotes).',
   };
+}
+
+/**
+ * PURE parser for CBOE's FREE delayed options feed
+ * (https://cdn.cboe.com/api/global/delayed_quotes/options/{TICKER}.json).
+ * No API key, no auth. Each row carries the OCC symbol
+ * (e.g. NVDA260717C00002500) + bid/ask/iv/delta/gamma/vega/theta/rho/
+ * open_interest/volume. We decode the OCC symbol for expiry/strike/right,
+ * which removes any dependence on a flaky crumb-based Yahoo path.
+ * Returns null when unparseable / empty.
+ */
+const CBOE_SYMBOL = /^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/;
+export function parseCboeOptions(ticker: string, payload: any): OptionChainResult | null {
+  const data = payload?.data;
+  const rows = data?.options;
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  // CBOE ships the REAL underlying quote at the top level — use it as spot.
+  // (Deriving spot from the median strike, as an earlier version did, made
+  // every contract look deep ITM/OTM and pinned recomputed delta to ±1.0.)
+  const topSpot = numOr(data.current_price ?? data.close ?? data.prev_day_close, 0);
+  const expirySet = new Set<string>();
+  const quotes: OptionQuote[] = [];
+  const cboeGreeks: Array<{ delta: number | undefined; gamma: number | undefined; vega: number | undefined; theta: number | undefined; rho: number | undefined }> = [];
+  let spot = topSpot;
+  const now = new Date();
+  const rfr = resolveRfr();
+  for (const r of rows) {
+    const m = CBOE_SYMBOL.exec(String(r.option ?? ''));
+    if (!m) continue;
+    const yy = m[2], mm = m[3], dd = m[4];
+    const expISO = `20${yy}-${mm}-${dd}`;
+    const type: OptionRight = m[5] === 'C' ? 'C' : 'P';
+    const strike = Number(m[6]) / 1000;
+    if (strike <= 0) continue;
+    const bid = numOr(r.bid);
+    const ask = numOr(r.ask);
+    const last = numOr(r.last_trade_price ?? r.theo ?? (bid + ask) / 2);
+    // CBOE reports IV as a DECIMAL already (e.g. 0.7709 = 77%). Do NOT /100.
+    // CBOE sometimes sends 0 IV for illiquid deep-ITM contracts; treat 0 as
+    // "missing" so it doesn't poison the vol-surface analyst (ATM IV/skew).
+    const rawIv = numOr(r.iv, 0);
+    const iv = rawIv > 0 ? rawIv : 0.3;
+    const volume = numOr(r.volume ?? 0);
+    const openInterest = numOr(r.open_interest ?? 0);
+    expirySet.add(expISO);
+    quotes.push({
+      expiry: expISO,
+      strike,
+      type,
+      bid,
+      ask,
+      last,
+      volume,
+      open_interest: openInterest,
+      iv,
+      underlying_price: spot,
+      underlying_ts: new Date().toISOString(),
+    });
+    // Capture CBOE's own greeks (they are correct + smooth); undefined when
+    // the feed omits a field so we can BS-fill just that gap below.
+    cboeGreeks.push({
+      delta: isFiniteNum(r.delta) ? Number(r.delta) : undefined,
+      gamma: isFiniteNum(r.gamma) ? Number(r.gamma) : undefined,
+      vega: isFiniteNum(r.vega) ? Number(r.vega) : undefined,
+      theta: isFiniteNum(r.theta) ? Number(r.theta) : undefined,
+      rho: isFiniteNum(r.rho) ? Number(r.rho) : undefined,
+    });
+  }
+  if (quotes.length === 0) return null;
+  // Fallback only if CBOE gave no usable underlying quote.
+  if (!spot) {
+    const near = Array.from(expirySet).sort()[0];
+    const nearStrikes = quotes.filter((q) => q.expiry === near).map((q) => q.strike).sort((a, b) => a - b);
+    spot = nearStrikes.length ? (nearStrikes[Math.floor(nearStrikes.length / 2)] ?? basePrice(ticker)) : basePrice(ticker);
+  }
+  for (const q of quotes) q.underlying_price = spot;
+  // Prefer CBOE's published greeks; BS-fill any missing field per row so the
+  // greeks column is smooth and delta ≈ 0.5 at-the-money, not a step to ±1.
+  const greeks: GreeksRow[] = quotes.map((q, i) => {
+    const c = cboeGreeks[i] ?? { delta: undefined, gamma: undefined, vega: undefined, theta: undefined, rho: undefined };
+    const ttm = yearsToExpiry(`${q.expiry}T00:00:00.000Z`, now);
+    const needsFill = c.delta === undefined || c.gamma === undefined || c.vega === undefined || c.theta === undefined || c.rho === undefined;
+    const bs = needsFill ? bsGreeks(q.type, spot, q.strike, ttm, rfr, q.iv) : null;
+    return {
+      expiry: q.expiry,
+      strike: q.strike,
+      type: q.type,
+      delta: parseFloat((c.delta ?? bs!.delta).toFixed(4)),
+      gamma: parseFloat((c.gamma ?? bs!.gamma).toFixed(6)),
+      vega: parseFloat((c.vega ?? bs!.vega).toFixed(4)),
+      theta: parseFloat((c.theta ?? bs!.theta).toFixed(4)),
+      rho: parseFloat((c.rho ?? bs!.rho).toFixed(4)),
+      iv_in: q.iv,
+      underlying_price: spot,
+      ttm_years: parseFloat(ttm.toFixed(6)),
+      rfr,
+    };
+  });
+  return {
+    ticker: ticker.toUpperCase(),
+    underlying_price: spot,
+    quotes,
+    expiries: Array.from(expirySet).sort(),
+    rfr,
+    greeks,
+    source: 'cboe',
+    note: 'Delayed ~15-20 min — free CBOE delayed options feed (real bid/ask/IV + greeks).',
+  };
+}
+
+/** Fetches + parses the CBOE delayed options feed. No key required. */
+export async function fetchCboeOptionChain(
+  ticker: string,
+  gf?: (url: string, init?: any) => Promise<any>,
+): Promise<OptionChainResult | null> {
+  const fetchFn = gf ?? ((globalThis as any).fetch as ((url: string, init?: any) => Promise<any>) | undefined);
+  if (typeof fetchFn !== 'function') {
+    logger.warn(`[options] CBOE fallback skipped for ${ticker}: no fetch transport available.`);
+    return null;
+  }
+  try {
+    const url = `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(ticker.toUpperCase())}.json`;
+    const res = await fetchFn(url, { method: 'GET', headers: { 'User-Agent': YAHOO_UA, Accept: 'application/json' } });
+    if (!res || !res.ok) {
+      logger.warn(`[options] CBOE fallback failed for ${ticker}: HTTP ${res?.status ?? 'no-response'}. Falling back.`);
+      return null;
+    }
+    const payload = (await res.json().catch(() => null)) as any;
+    const parsed = parseCboeOptions(ticker, payload);
+    if (parsed) {
+      logger.info(`[options] CBOE delayed feed OK for ${ticker}: ${parsed.quotes.length} quotes across ${parsed.expiries.length} expiry.`);
+    } else {
+      logger.warn(`[options] CBOE fallback returned an unparseable/empty payload for ${ticker}.`);
+    }
+    return parsed;
+  } catch (e) {
+    logger.warn(`[options] CBOE fallback errored for ${ticker}: ${e instanceof Error ? e.message : String(e)}.`);
+    return null;
+  }
 }
 
 /** PURE parser: Polygon v3 options snapshot payload → OptionQuote[].
@@ -895,6 +1041,10 @@ export async function fetchOptionChain(
   }
   const mockBundle = generateMockBundle(sym, realSpot ? { spot: realSpot } : {});
   if (!apiKey) {
+    // Real delayed data, no key: CBOE's free feed first (Yahoo's tokenless
+    // path is now 429/crumb-blocked, so it's a last-resort fallback).
+    const cboe = await fetchCboeOptionChain(sym, doFetch);
+    if (cboe) return cboe;
     const yahoo = await fetchYahooOptionChain(sym, doFetch);
     if (yahoo) return yahoo;
     // Yahoo was attempted but returned nothing — explain in the console + note so
@@ -913,6 +1063,13 @@ export async function fetchOptionChain(
         : 'MOCK — no live feed. No POLYGON_API_KEY and Yahoo tokenless fetch returned no data. See backend [options] logs.',
     };
   }
+  // Before falling back to a deterministic MOCK, try CBOE's free delayed
+  // feed. This is the honest "real bid/ask another way" path: it needs no
+  // key, so it works whether or not a (entitlement-blocked) Massive key is
+  // set. We prefer real delayed data over a synthetic mock wherever possible.
+  const cboe = await fetchCboeOptionChain(sym, doFetch);
+  if (cboe) return cboe;
+
   return {
     ticker: sym,
     underlying_price: mockBundle.underlying_price,
@@ -938,11 +1095,13 @@ export async function fetchOptionChain(
  */
 export interface LiveOptionsResult extends HistoricalBundle {
   /** 'live' when both price bars + chain came from a provider; 'mock' otherwise. */
-  source: 'polygon' | 'yahoo' | 'mock';
+  source: 'polygon' | 'yahoo' | 'cboe' | 'mock';
   /** True when the option CHAIN was acquired live (drives the Options-tab badge). */
   chainLive?: boolean;
   /** True when the historical price BARS were acquired live (tracked separately). */
   barsLive?: boolean;
+  /** Provenance note (e.g. Massive 401 entitlement story, or CBOE delayed feed). */
+  note?: string;
 }
 
 function chainToGreeksRows(
@@ -995,6 +1154,16 @@ export async function resolveLiveOptionsBundle(
   });
   const chainMock = chainRes.source === 'mock';
 
+  // Real-bid/ask fallback: if the keyed Polygon path wasn't entitled (or no
+  // key), try CBOE's free delayed feed before settling for a synthetic mock
+  // chain. This keeps the vol-surface / pricing analysts on REAL data.
+  let chainFinal = chainRes;
+  if (chainMock) {
+    const gf = opts.fetchFn ?? ((globalThis as any).fetch as ((u: string, i?: any) => Promise<any>) | undefined);
+    const cboe = await fetchCboeOptionChain(ticker, gf as any);
+    if (cboe) chainFinal = cboe;
+  }
+
   const price_bars: PriceBarSeries[] = priceMock
     ? base.price_bars
     : [
@@ -1005,12 +1174,12 @@ export async function resolveLiveOptionsBundle(
         },
       ];
 
-  const option_chain = chainMock ? base.option_chain : chainRes.quotes;
-  const underlying_price = chainMock ? base.underlying_price : chainRes.underlying_price;
+  const option_chain = chainFinal.source === 'mock' ? base.option_chain : chainFinal.quotes;
+  const underlying_price = chainFinal.source === 'mock' ? base.underlying_price : chainFinal.underlying_price;
   const greeks = chainToGreeksRows(option_chain, underlying_price, rfr);
-  const expiries = chainMock ? base.expiries : chainRes.expiries;
+  const expiries = chainFinal.source === 'mock' ? base.expiries : chainFinal.expiries;
 
-  const live = !priceMock && !chainMock;
+  const live = !priceMock && chainFinal.source !== 'mock';
   return {
     ticker,
     underlying_price,
@@ -1021,6 +1190,7 @@ export async function resolveLiveOptionsBundle(
     expiries,
     iv_history: base.iv_history,
     mock: !live,
-    source: live ? 'polygon' : 'mock',
+    source: chainFinal.source,
+    ...(chainFinal.note ? { note: chainFinal.note } : {}),
   };
 }
