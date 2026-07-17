@@ -61,6 +61,32 @@ over Socket.IO, and renders the result in a React single-page app.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full data-flow and
 LangGraph state schema.
 
+## Graphify (code knowledge graph for AI agents)
+
+To cut the tokens an LLM agent spends re-reading the codebase, the repo ships a
+[Graphify](https://graphify.com/) knowledge graph. It statically parses the code
+(on-device, 36 languages, no telemetry — safe for the encrypted credential
+vault) into a typed graph and serves it over MCP so an agent retrieves only the
+relevant subgraph for a task instead of grepping/dumping whole files.
+
+- **Build / refresh:** `npm run graphify` — code-only AST extract + clustering
+  into `.graphify/` (no LLM key needed). To also index the Markdown docs, set an
+  LLM key (`GOOGLE_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) and run
+  `npm run graphify:docs`. Requires `pip install "graphifyy[mcp]"` (the `[mcp]`
+  extra is needed to run the server).
+- **Query it:** `.mcp.json` at the repo root already points an MCP client at
+  `.graphify/graph.json` (`python -m graphify.serve`). On the deploy host, change
+  the `command` to the host `python` (with `graphifyy[mcp]` installed) or run
+  `graphify install` to auto-wire assistants. CLI equivalents: `graphify explain
+  "<symbol>"`, `graphify query "<question>"`, `graphify affected "<symbol>"`.
+- **Git:** `.graphify/graph.json` + `.graphify/GRAPH_REPORT.md` are committed
+  (shareable, so teammates skip re-indexing); `cache/`, `graph.html` and the rest
+  stay gitignored.
+- **Measured impact:** orienting on a symbol (e.g. `resolveLiveOptionsBundle`)
+  returns file+line + traced connections in ~180 tokens vs ~462k tokens to read
+  the whole corpus — a ~2500× saving on that task.
+- Full convention + caveats: [`AGENT.md` §10](../AGENT.md).
+
 ## Screenshots
 
 ![Options Agency screener](screenshots/DateSelector.jpg)

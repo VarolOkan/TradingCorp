@@ -22,3 +22,13 @@ tmp/
 # TypeScript incremental build info
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Graphify code knowledge-graph output (run `npm run graphify` to (re)generate).
+# Graphify's own docs say graph.json + GRAPH_REPORT.md are meant to be committed
+# so teammates skip re-indexing; the cache/ and graph.html visualizer are
+# regenerable. Ignore the dir's *contents* (not the dir entry) so the two
+# shareable artifacts below can be re-included.
+.graphify/**
+!.graphify/graph.json
+!.graphify/GRAPH_REPORT.md
+graphify-out/

@@ -16,7 +16,9 @@
     "test:ui": "vitest run --coverage --config vite.config.ts",
     "test:ui:watch": "vitest --coverage --config vite.config.ts",
     "lint": "eslint src --ext .ts,.tsx",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "graphify": "GRAPHIFY_OUT=.graphify graphify extract . --code-only && GRAPHIFY_OUT=.graphify graphify cluster-only .",
+    "graphify:docs": "GRAPHIFY_OUT=.graphify graphify extract ."
   },
   "keywords": [
     "financial",
