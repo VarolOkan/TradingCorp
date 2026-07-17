@@ -413,6 +413,10 @@ before the next begins.
 | **22** | **Screener horizon + asset class as agency-level defaults** — the per-run Timeframe/Instrument selects from Phase 21 were **removed**; horizon and instrument are now properties of the *agency*, not a per-run pick. Each `AgencyDef` carries three explicit, editable fields — `assetClass` (`EQUITY`/`OPTION`/`CRYPTO`), `screenerInterval` (`1m`/`5m`/`1h`/`4h`/`1d` — **1h/4h added**, each with a real bar generator in `hist.ts`: 1h step 3.6M ms, 4h step 14.4M ms, vwap present, count capped 390), and `screenerLookbackDays`. `resolveScreenerProfile(agencyId, agencyDef?)` merges explicit fields over per-category defaults (long/medium → EQUITY 1d/90d; intraday → EQUITY 5m/5d; crypto-screener → CRYPTO 1d/90d; options-swing → OPTION 1d/90d; options-intraday → OPTION 5m/5d). The three fields are edited on a **single row** in the Agency settings dialog and persisted via `PUT/POST /registry/agency`. The Stock Screener header shows the resolved profile as an **inline badge** `most promising for <agency> [interval · lookbackDays · assetClass]` that recomputes on agency switch. `CRYPTO` is selectable but honestly labelled "universe source TBD" (not yet screenable). See `docs/SCREENER_STANDARDS.md §8`. New backend profile-override + instrument + 1h/4h history tests; frontend Phase-22 panel + badge-switch tests. | ✅ Done |
 | **23** | **LLM model config no longer wiped by partial writes** — root-caused a bug where `.data/llm-config.json` could silently lose a role (e.g. `scanner`) and never recover it. Cause: `LlmConfigStore` held all 3 roles in memory but `JsonLlmStore` only persisted roles it had explicitly seen; once the on-disk file lost a role (older full-replace POST, or a stale client sending a partial `configs` array), every subsequent save re-flushed only the known subset, so the missing role stuck. Fix (`src/server/llm-config.ts`): (1) **self-heal on load** — the store re-seeds any canonical role missing from disk from defaults and writes it back; (2) **complete writes** — `put()` now persists **all** roles, so a single-role save (or partial POST) can never clobber the others. User selections are preserved (gaps filled, never overwritten). 2 new regression tests in `llm-config.test.ts`. | ✅ Done |
 | **24** | **Crypto agency hidden (deferred, hooks kept)** — the `crypto-screener` agency is **hidden from the selectable dropdown by default** because its real data sources (crypto universe provider + on-chain net-flow/active-address metrics) don't exist yet; shipping it now would be either fake data (violates the honest-labeling standard) or equity-in-disguise. Rather than delete it, `AgencyDef` gained a `hidden?: boolean` flag; `crypto-screener` sets it, the backend `/registry` list omits `hidden` agencies unless `ENABLE_CRYPTO_AGENCY=true`, and the frontend `AgencySelect` filters them. **All hooks stay intact**: the `onchain` analyst (declarative, LLM-free), `CRYPTO` asset-class enum, the resolver, and the existing `crypto-screener.test.ts`. Re-enabling later is a one-env-flag flip, no rework. 2 new backend tests (hidden-by-default + revealed-with-env). | ✅ Done |
+| **25** | **Live data-source integration + honest provenance** — the ingestion path now consumes **live inputs** instead of pure seeded demo data: Yahoo price/history/quote (tokenless), Alpha Vantage `OVERVIEW` fundamentals (keyed), and Finnhub `company-news` sentiment (keyed) each override their seeded block when reachable, via `fetchRealFinancialData`. Options ingestion targets **Massive/Polygon** (`api.massive.com`, Bearer) when entitled. Every domain reports a per-source provenance (`live`/`seeded`/`yahoo`/`polygon`/`cboe`) in `data_quality.sources` and the analyst trace notes, and the Results banner "MOCK — no live source" is gated on `dataHealth.sourcesOk === 0` (no false MOCK while live sources are green). Credentials live in the encrypted LLM vault (Settings dialog), not `.env`. | ✅ Done |
+| **26** | **CBOE free option-chain fallback + honest badges** — when Massive returns 401/403 (entitlement) or no key is set, `fetchOptionChain` falls through to the **free CBOE delayed feed** (`cdn.cboe.com/api/global/delayed_quotes/options/{TICKER}.json`, no key, UA Mozilla) — real bid/ask/iv + per-contract greeks, delayed ~15–20 min. `resolveLiveOptionsBundle` wires it into `options_ingestion` and the vol-surface / pricing / greeks / flow / risk side-panes, so those analysts compute on **real** delayed quotes. Source badge is honest: `LIVE` (Massive entitled) / `DELAYED` (CBOE) / `MOCK`; the RawDataDrawer provenance label + the small **orange** `.quote-warn` MOCK note reflect the true reason (e.g. "Massive key configured but live call returned 401"). Verified live (NVDA/AAPL/TSLA/SOFI). | ✅ Done |
+| **27** | **Correct options greeks (CBOE feed, real spot, decimal IV)** — root-caused delta pinning to ±1.0: the chain parser used a **median-strike heuristic as spot** and divided CBOE's already-decimal IV by 100. Fix (`parseCboeOptions` in `hist.ts`): read the real underlying from CBOE `current_price`, use CBOE's own Δ/Γ/ν/Θ/ρ directly (BS `bsGreeks` only as a per-field fallback), treat `iv: 0` as missing (fallback 0.3). A dedicated **BS-vs-CBOE parity test** (`src/tests/greeks-cboe-parity.test.ts`) validates our derived greeks against the real feed on a captured fixture (`fixtures/cboe-nvda-greeks.json`) plus an opt-in live layer (`RUN_LIVE_CBOE=1`); tolerances are mean + 95th-percentile (delta p95 ≈ 0.022) to avoid flaky live outliers, excluding 0–2 DTE. | ✅ Done |
+| **28** | **No-run chart preview (watchlist click / ticker blur)** — clicking a **Watchlist** chip or leaving the **Ticker symbols** input now fills in and shows the `MarketDataCard` chart **immediately**, without waiting for `[Analyze]`. `AnalysisView` keeps a separate `previewTickers` state (distinct from the run-owned `wallTickers`), validated via `getQuote` — if the symbol can't be resolved, **nothing** is shown (no card, no error). `[Analyze]` still starts the agency run and takes ownership of the card (preview cleared). 4 new frontend tests (chip preview / blur preview / not-found→nothing / Analyze transition). | ✅ Done |
 
 ---
 
@@ -421,8 +425,15 @@ before the next begins.
 | Suite        | Command                          | Framework            | Coverage |
 |--------------|----------------------------------|----------------------|----------|
 | **All**      | `npm test`                       | Jest + Vitest        | both     |
-| Backend      | `npm run test:server`            | Jest + ts-jest       | ✓ (`coverage/`) — **434 tests, 51 suites** |
-| Frontend     | `npm run test:ui`                | Vitest + Testing Library | ✓ (`coverage/`) — **240 tests, 37 files**  |
+| Backend      | `npm run test:server`            | Jest + ts-jest       | ✓ (`coverage/`) — **~540 tests, 64 suites** |
+| Frontend     | `npm run test:ui`                | Vitest + Testing Library | ✓ (`coverage-ui/`) — **322 tests, 39 files**  |
+
+> A handful of backend suites (`llm-config`, `llm-sqlite`, `news`,
+> `data-received.r2`, `server-log`) are **environment-gated** — they need a
+> writable store path / `LLM_VAULT_PASSPHRASE` / a live news transport and will
+> fail in a bare sandbox with no vault or keys. Run them where those are
+> configured. All frontend suites and the core backend logic suites are green
+> unconditionally.
 
 ```bash
 npm test            # runs test:server (jest, coverage) THEN test:ui (vitest, coverage)
@@ -442,14 +453,20 @@ npm run test:ui     # frontend vitest suite + coverage report
 
 - The orchestrator's `parseQuery()` still contains hardcoded test strings
   (documented in [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)).
-- The per-analyst analysis inputs are still deterministic seeded demo logic
-  (no live feed behind a credential for the analysis itself). **However**, live
-  **company-name + market data** now ships: after you enter a ticker, the unified
-  **`MarketDataCard`** shows the real company name, price, day range, 52-week
-  range, and volume via the tokenless `GET /quote` (Yahoo) endpoint, plus a D3
-  price chart (`GET /history`) and an option chain (`GET /options-history`).
+- The per-analyst **scoring/weighting** logic is still the deterministic model,
+  but it now consumes **live inputs**: Yahoo price/history, Alpha Vantage
+  fundamentals (keyed), Finnhub news/sentiment (keyed), and a live option chain
+  from **Massive/Polygon** (entitled) → **CBOE free delayed feed** (no key)
+  before any mock. The unified **`MarketDataCard`** shows real company name,
+  price, ranges, volume, a D3 price chart, and a real option chain with
+  feed-provided/derived greeks. Provenance is surfaced honestly (LIVE/DELAYED/
+  MOCK badges + per-domain source notes); the vol-surface remains a deterministic
+  mock.
 - Full details and the external-data integration roadmap:
   [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
+- **AI agents working in this repo: read [`AGENT.md`](AGENT.md) first** — it holds
+  the deploy procedure (two-copies gotcha), data-source rules, and the
+  semantic-honesty bar.
 
 ---
 

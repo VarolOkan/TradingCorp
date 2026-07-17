@@ -26,7 +26,7 @@ function ingestedFor(ticker: string) {
     bars: { [ticker]: [{ interval: '1d' as const, lookback_days: 365, bars: Array.from({ length: 252 }, (_, i) => ({ t: `2026-${String((i % 12) + 1).padStart(2, '0')}-01`, open: 100 + i, high: 101 + i, low: 99 + i, close: 100 + i, volume: 1000 })) }] },
     market: { [ticker]: { price: 352, day_high: 355, day_low: 349, volume: 1_000_000, interval: '1d', bars_used: 252, beta: 1.2, volatility_30d: 0.35 } },
     fundamental: { [ticker]: { key_ratios: { debt_to_equity: 0.4, current_ratio: 1.5, roe: 0.18, roa: 0.09, profit_margin: 0.22, free_cash_flow_yield: 0.06 }, financial_health_score: 82 } },
-    sentiment: { [ticker]: { sentiment_score: 42, news_sentiment: 'POSITIVE' } },
+    sentiment: { [ticker]: { sentiment_score: 42, news_sentiment: 'POSITIVE', data_source: 'yahoo:live-sentiment' } },
     source: 'yahoo' as const,
   };
 }

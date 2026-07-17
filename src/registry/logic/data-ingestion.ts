@@ -640,7 +640,7 @@ export async function fetchRealFinancialData(
       try {
         const news = await fetchCompanyNews(
           ticker,
-          { finnhubKey: newsOpts?.finnhubKey, fetchFn: (globalThis as any).fetch as any },
+          { finnhubKey: newsOpts?.finnhubKey, fetchFn: (newsOpts?.newsFetcher ?? (globalThis as any).fetch) as any },
         );
         if (news.source === 'finnhub' && news.headlines.length > 0) {
           sentiment_data[ticker] = {

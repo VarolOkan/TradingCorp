@@ -24,50 +24,53 @@ denylist can still misclassify an English word that happens to be a valid ticker
 parsing — acceptable for a mock/demo pipeline; a real deployment should
 validate tickers against a symbol API.
 
-## 2. Most analysis data is mocked — but live quotes now ship (Phase 3)
+## 2. Live data is now wired for ingestion + options (not just quotes)
 
-`fetchFinancialData()` in `src/registry/logic/data-ingestion.ts` still returns
-RNG-generated numbers (seeded from the joined tickers via `stringToSeed`, so runs
-are deterministic). The fundamental/technical/sentiment/risk analysts and the
-governance gatekeeper therefore still operate on mock data.
+As of the recent work, the analysis **inputs** are largely live, not seeded:
 
-**What IS now live (Phase 3):** a tokenless `GET /quote?symbol=<TICKER>` endpoint
-(`src/server/quote.ts` + `quote-routes.ts`) proxies **Yahoo Finance**'
-tokenless chart endpoint and normalizes it to `{ symbol, name, price, dayHigh,
-dayLow, week52High, week52Low, previousClose, volume, currency, marketTime,
-source, note? }`. It is surfaced in the UI by the unified `MarketDataCard`
-(Quote tab) after a symbol is entered. Verified live:
-`/quote?AAPL` → "Apple Inc." $314.81, day 312.17–316.39, 52w 201.50–317.40,
-vol 16.5M. The endpoint degrades gracefully (returns a `note` instead of throwing)
-if Yahoo is unreachable, so the panel shows "Market data unavailable" rather than
-crashing.
+- **Price / History / Quote**: Yahoo Finance tokenless delayed feed
+  (`fetchPriceBars`, `GET /quote`, `GET /history`). Seeded `generateBars` is now
+  only a no-network fallback (parity-safe).
+- **Fundamentals**: Alpha Vantage `OVERVIEW` (keyed) overrides the seeded block
+  when a key is present (`data-ingestion.ts` → `liveFundamentals`).
+- **Sentiment / News**: Finnhub `company-news` (free key) overrides the seeded
+  sentiment verdict via the existing `realSent` hook — no analyst-code change.
+- **Options chain**: Massive/Polygon (`/v3/snapshot/options/{ticker}`, Bearer)
+  when entitled; **CBOE free delayed feed** (`cdn.cboe.com/.../{TICKER}.json`, no
+  key) as the real fallback when Massive 401/403s; seeded only as last resort.
+  The **greeks** come from CBOE's feed directly, or are re-derived by
+  `bsGreeks()` from the contract IV (CBOE `iv` is already a decimal — do NOT /100).
+  The option-chain **spot** is read from CBOE `current_price` (real underlying),
+  not a median-strike heuristic.
+- **Risk-free rate**: `api.fiscaldata.treasury.gov` (tokenless).
 
-**Still mock (by design):** the per-analyst *analysis inputs* (the data the
-analysts score) are still seeded. The options historical/derivatives layer
-(`src/registry/logic/hist.ts` → `fetchHistoricalBundle`) is mock-first; the live
-Polygon/Treasury `DataSourceSpec`s (`polygonOptions`, `polygonHist`, `treasuryRfr`)
-are declared on `options_ingestion` with `onError:'degrade'` but are **not yet
-wired to the acquisition layer** — see §11 / the external-data integration work.
-`config.dataSources.alphaVantage.apiKey` is still reserved/unused.
+**What is still synthetic (honestly labelled):** the per-analyst *scoring*
+verdicts themselves are produced by deterministic handlers; they consume the
+**live inputs above** but the score/weighting logic remains the seeded model.
+The vol-surface (`vol-surface.ts`) is still a deterministic mock, not a calibrated
+market surface. CBOE occasionally reports `iv: 0` for illiquid deep-ITM contracts
+— treated as missing (not fed downstream as 0).
+
+**Provenance is honest:** `data-ingestion.ts` emits a `data_quality.sources` list
+and per-domain `source` (`live`/`seeded`/`mock`/`yahoo`/`cboe`/`polygon`). The UI
+(banner, RawDataDrawer side-panes, Options tab badge) renders from that
+provenance — never a hardcoded label. A `MOCK` banner shows only when
+`dataHealth.sourcesOk === 0`.
+
+See the root `README.md` phased table (Phases 25–28) for the greeks validation,
+CBOE provenance, no-run chart preview, and the small-orange MOCK warning.
 
 > **Screener is live (does NOT fall under "mock").** The **Stock Screener**
-> (Phase 18) pulls a **real**, ~13k-symbol tradable universe from NasdaqTrader
-> (or the S&P 500 list via `UNIVERSE_PROVIDER=sp500`) and fetches **real Yahoo
-> price bars (tokenless, delayed ~15–20 min)** per ticker. The only mock
-> involved is the per-ticker bar fallback when the chart endpoint is throttled
-> (429). The screen's `dataSource` badge is therefore `DELAYED` in the normal
-> live case (with an `N/M live` sub-count), `LIVE` when every row is on live
-> bars, and `MOCK` only when the universe itself fell back and no rows are live.
-> A `Data lineage` block shows the exact universe pipeline and warns only on a
-> genuine fallback. Do **not** treat a `DELAYED`/`MOCK` badge as a UI bug — it
-> is a semantically honest statement of the data source (see README › Stock
-> Screener).
-
-**Fix direction:** wire the `polygonHist`/`polygonOptions`/`treasuryRfr` sources
-into `acquireForAnalyst` (behind the existing retry + `onError:'degrade'` policy)
-so the options `options_ingestion` node consumes real historical price + option
-chains + risk-free rate when a key is present, degrading to the `hist.ts` mock
-otherwise. This keeps the parity guarantee (no key = no behavior change) intact.
+> pulls a **real**, ~13k-symbol tradable universe from NasdaqTrader (or the S&P
+> 500 list via `UNIVERSE_PROVIDER=sp500`) and fetches **real Yahoo price bars
+> (tokenless, delayed ~15–20 min)** per ticker. The only mock involved is the
+> per-ticker bar fallback when the chart endpoint is throttled (429). The screen's
+> `dataSource` badge is therefore `DELAYED` in the normal live case (with an
+> `N/M live` sub-count), `LIVE` when every row is on live bars, and `MOCK` only
+> when the universe itself fell back and no rows are live. A `Data lineage` block
+> shows the exact universe pipeline and warns only on a genuine fallback. Do
+> **not** treat a `DELAYED`/`MOCK` badge as a UI bug — it is a semantically honest
+> statement of the data source.
 
 ## 3. `package.json` `main` points at the TypeScript entry
 
@@ -237,24 +240,42 @@ parity-safe):
    hi/lo/avg vol) + a recent-bars table, with a `live`/`mock` badge. Vite proxies
    `/history`. Verified live against Yahoo (AAPL, MSFT). Tests:
    `src/tests/history.test.ts` (8) + `frontend/src/test/MarketDataCard.test.tsx` (7).
-2. **Options historical chains — `GET /options-history?symbol=`** (SHIPPED).
-   `fetchOptionChain(ticker, {apiKey, fetchFn})` calls Polygon's options
-   snapshot (`/v3/snapshot/options/{ticker}`) and maps it to `OptionQuote[]`;
-   greeks are re-derived via `bsGreeks` for consistency. Mock fallback when no
-   `POLYGON_API_KEY` (parity: no key = mock bundle, unchanged). The frontend
-   frontend `MarketDataCard` (Options tab) shows an expiry selector +
-   ATM-highlighted call/put table. Vite proxies `/options-history`. Tests:
-   `src/tests/options-history.test.ts` (7) + `frontend/src/test/MarketDataCard.test.tsx` (7).
-3. **Wired into `options_ingestion`** (SHIPPED). `resolveLiveOptionsBundle(ticker,
-   profile, {apiKey, fetchFn})` upgrades the base mock bundle with live Yahoo
-   bars + Polygon chain when a key/transport is present; the `options_ingestion`
-   handler reports the real `source` in its trace inputs + a conditional note
-   ("set POLYGON_API_KEY to wire live" vs "Live Polygon… wired in"). Parity
-   preserved: no key = identical mock behavior. Tests:
-   `src/tests/live-bundle.test.ts` (2).
+2. **Options historical chains — `GET /options-history?symbol=`** (SHIPPED, CBOE fallback added).
+   `fetchOptionChain(ticker, {apiKey, fetchFn})` calls **Massive/Polygon**'s options
+   snapshot (`/v3/snapshot/options/{ticker}`, Bearer auth, base `api.massive.com`)
+   and maps it to `OptionQuote[]`; greeks are taken from the feed when present and
+   otherwise re-derived via `bsGreeks` for consistency. **When Massive returns
+   401/403 (entitlement) OR no key is set, the call falls through to the free
+   CBOE delayed feed** (`https://cdn.cboe.com/api/global/delayed_quotes/options/{TICKER}.json`,
+   no key, UA `Mozilla/5.0`) which ships real bid/ask/iv/**delta/gamma/vega/theta/rho**
+   per contract — `parseCboeOptions` reads the real underlying `current_price` as
+   spot and uses CBOE's own greeks directly (IV is already a decimal; do NOT /100).
+   Seeded mock is the last-resort fallback only. The frontend `MarketDataCard`
+   (Options tab) shows an expiry selector + ATM-highlighted call/put table with a
+   `LIVE` (Massive entitled) / `DELAYED` (CBOE real) / `MOCK` source badge. Vite
+   proxies `/options-history`. Verified live against CBOE (NVDA, AAPL, TSLA, SOFI)
+   and Massive (401 entitlement → CBOE path). Tests:
+   `src/tests/options-history.test.ts` + `frontend/src/test/MarketDataCard.test.tsx`
+   + `src/registry/logic/hist.test.ts` (CBOE fallback) +
+   `src/tests/greeks-cboe-parity.test.ts` (BS-vs-CBOE greeks validation).
+3. **Wired into `options_ingestion` + the vol-surface / pricing analysts** (SHIPPED).
+   `resolveLiveOptionsBundle(ticker, profile, {apiKey, fetchFn})` upgrades the base
+   mock bundle with live Yahoo bars + Massive chain (→ CBOE fallback) when a
+   key/transport is present; the `options_ingestion` handler reports the real
+   `source` in its trace inputs + a conditional note (entitlement story vs
+   "Live … wired in"). The vol-surface / pricing / greeks / flow / risk analysts
+   now compute on **real delayed bid/ask** (source `cboe`/`polygon`/`yahoo`),
+   surfaced honestly in the RawDataDrawer side-panes. Parity preserved: no key =
+   identical mock behavior. Tests: `src/tests/live-bundle.test.ts` + RawDataDrawer
+   provenance tests.
 
-To enable live options: set `POLYGON_API_KEY` in the server environment (e.g.
-`.env`); quotes need no key (Yahoo tokenless).
+To enable live options: the options path targets **Massive/Polygon**
+(`api.massive.com`, Bearer token) when a key is configured; without a key it uses
+the free **CBOE** delayed feed automatically. Quotes/history need no key (Yahoo
+tokenless). The `[Test]` probe in the Settings UI checks `/v3/reference/dividends`
+(ticker-independent, Bearer) — note a passing probe means the *dividends*
+entitlement works, not necessarily the options snapshot (separate entitlement);
+a 401 there is the known Massive options-entitlement gap (→ CBOE fallback).
 
 ### 11.1 Raw per-analyst data dump ships as `report-<id>.json`
 A new export sibling persists **all raw collected data** with a per-analyst

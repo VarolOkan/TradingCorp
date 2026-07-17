@@ -166,9 +166,9 @@ handler for `fn` analysts, or `declarativeHandler` for `declarative` analysts.
 | Analyst | Handler file | Responsibility | TradingAgents layer |
 |---------|--------------|----------------|---------------------|
 | Orchestrator | `registry/logic/orchestrator.ts` | Parses the user query into tickers + options (depth, time horizon, risk tolerance). Entry point. | — |
-| Data Ingestion | `registry/logic/data-ingestion.ts` | "Fetches" fundamental/technical/sentiment/market data (currently mock). Wraps calls in `RetryHandler`. | Stage 1 (Information Gathering) |
+| Data Ingestion | `registry/logic/data-ingestion.ts` | Gathers fundamental/technical/sentiment/market data. Each domain overrides its seeded block when a live source is reachable (Yahoo price/history, Alpha Vantage `OVERVIEW` fundamentals, Finnhub `company-news` sentiment) via `fetchRealFinancialData`; otherwise falls back to seeded. Reports per-domain provenance (`live`/`seeded`/`yahoo`/`finnhub`/…) in `data_quality.sources`. Wraps calls in `RetryHandler`. | Stage 1 (Information Gathering) |
 | Live Quote (Phase 3) | `server/quote.ts` + `server/quote-routes.ts` | `GET /quote?symbol=` proxies **Yahoo Finance** (tokenless) for real company name + market data; surfaced in the unified `MarketDataCard` (Quote tab). Degrades to a `note` on failure. | — |
-| Options Historical Layer | `registry/logic/hist.ts` | `fetchHistoricalBundle()` returns `{ price_bars, option_chain, greeks, rfr, expiries, iv_history }`. Now backed by real fetchers via `fetchPriceBars` (Yahoo tokenless → `GET /history`) + `fetchOptionChain` (Polygon keyed → `GET /options-history`), wired into `options_ingestion` through `resolveLiveOptionsBundle`. Mock-first/parity-safe (no `POLYGON_API_KEY` → identical mock bundle). See KNOWN_ISSUES §11. | Stage 1 (Options) |
+| Options Historical Layer | `registry/logic/hist.ts` | `fetchHistoricalBundle()` returns `{ price_bars, option_chain, greeks, rfr, expiries, iv_history }`. Backed by real fetchers via `fetchPriceBars` (Yahoo tokenless → `GET /history`) + `fetchOptionChain` (Massive/Polygon `api.massive.com` keyed → `GET /options-history`; on 401/403 or no key, **free CBOE delayed feed** fallback with real bid/ask/iv + greeks), wired into `options_ingestion` through `resolveLiveOptionsBundle`. Parity-safe (no key → identical seeded bundle). Greeks follow the chain's source (CBOE-provided when on CBOE; BS fallback otherwise). See KNOWN_ISSUES §11. | Stage 1 (Options) |
 | Fundamental Analyst | `registry/logic/fundamental.ts` | Produces `FundamentalAnalysis` (balance sheet, ratios, moat, flags). | Stage 2 |
 | Technical Analyst | `registry/logic/technical.ts` | Produces `TechnicalAnalysis` (trend, indicators, support/resistance, signals). | Stage 2 |
 | Sentiment Analyst | `registry/logic/sentiment.ts` | Produces `SentimentAnalysis` (news/social/analyst/institutional sentiment). | Stage 2 |
@@ -344,19 +344,18 @@ See the root `README.md` [phased plan](./README.md#frontend-rewrite--phased-plan
 ## Options agencies & data layer
 
 The options agencies (see `docs/EXTENDING_ANALYSTS.md §8` and the design in `docs/archive/OPTIONS_AND_AGENCY_EXPANSION.md`) add a
-**deterministic options data layer** (no external market API) plus two new
-`AgencyDef`s that trade `instrument: 'OPTION'`. All randomness is seeded from
-the ticker string (`stringToSeed` + `seededRandom`), so a given
-`(ticker, agency)` is byte-reproducible — the same parity guarantee as the
-equity path.
+**deterministic-by-default options data layer** with **live option-chain sourcing**. The option chain is pulled live from **Massive/Polygon** (`api.massive.com`, keyed) when entitled, or the **free CBOE delayed feed** when not — with a seeded deterministic fallback used **only** when both live sources fail (or `DISABLE_MOCK_DATA` is off and no key). All randomness in the fallback is seeded from the ticker string (`stringToSeed` + `seededRandom`), so a given `(ticker, agency)` is byte-reproducible — the same parity guarantee as the equity path.
 
 ### Data layer (`src/registry/logic/`)
 
 - **`hist.ts`** — `fetchHistoricalBundle(ticker, profile)` returns a
   `HistoricalBundle`: daily OHLCV, a set of expiries, and per-expiry option
-  quotes (strike / right / bid / ask / IV / greeks / oi / volume). The
-  `makeRng` wrapper normalizes `seededRandom` into `[0,1)` so every draw is
-  positive. This is the single source of truth for every options analyst.
+  quotes (strike / right / bid / ask / IV / greeks / oi / volume). When a live
+  chain is available it carries **real** quotes (Massive/CBOE) and feed-provided
+  greeks (CBOE supplies Δ/Γ/ν/Θ/ρ directly; BS `computeGreeks` is the fallback
+  for derived fields and for seeded builds). The `makeRng` wrapper normalizes
+  `seededRandom` into `[0,1)` so the seeded fallback's every draw is positive.
+  This is the single source of truth for every options analyst.
 - **`vol-surface.ts`** — `buildVolSurface(bundle)` → `VolSurface` (term +
   moneyness skew), also emitted as `call_iv`/`put_iv` channels.
 - **`greeks.ts`** — Black–Scholes `computeGreeks` (delta/gamma/vega/theta/rho)

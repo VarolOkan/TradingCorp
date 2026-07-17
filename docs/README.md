@@ -8,10 +8,17 @@ investment philosophy. The backend graph is adapted from the open-source
 **TradingAgents** reference design; see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 > Status: functional. The **Stock Screener** and the **Market Data Card** (quote
-> / history / options / news) run on **live, tokenless data** (Yahoo + Nasdaq
-> listed directory; Polygon for options when `POLYGON_API_KEY` is set). The
-> per-analyst *analysis* itself still uses deterministic seeded data by design
-> (see [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) §2). The **Analyst Wall**
+> / history / options / news) run on **live data**: Yahoo (tokenless price/
+> history/quote), the Nasdaq listed directory (screener universe), Alpha Vantage
+> `OVERVIEW` (fundamentals, keyed), Finnhub `company-news` (sentiment, keyed),
+> and a live option chain from **Massive/Polygon** (`api.massive.com`, when
+> entitled) → **CBOE free delayed feed** (no key) as the real fallback. The
+> ingestion path feeds these live inputs to the analysts; only the per-analyst
+> **scoring/weighting** logic and the vol-surface remain deterministic models
+> (see [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) §2). Provenance is surfaced honestly
+> (LIVE/DELAYED/MOCK badges + per-domain source notes). **AI agents: read
+> [`../AGENT.md`](../AGENT.md) first** (deploy rule, data sources, honesty bar).
+> The **Analyst Wall**
 > (real-time per-analyst streaming) and the **drill-down trace drawer** (click
 > any analyst panel → Instructions / Data / Weighting→Output / Sources, with
 > breadcrumb traceability) are implemented. The UI **auto-connects** on load (up

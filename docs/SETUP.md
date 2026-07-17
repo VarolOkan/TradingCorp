@@ -34,7 +34,11 @@ project root). All values have sensible defaults — `.env` is optional.
 | `DEFAULT_TIME_HORIZON` | `MEDIUM_TERM` | `SHORT_TERM` \| `MEDIUM_TERM` \| `LONG_TERM` |
 | `DEFAULT_RISK_TOLERANCE` | `MODERATE` | `CONSERVATIVE` \| `MODERATE` \| `AGGRESSIVE` |
 | `LOG_LEVEL` | `info` | Logger verbosity |
-| `ALPHA_VANTAGE_API_KEY` | *(empty)* | Reserved for future data-source integration |
+| `ALPHA_VANTAGE_API_KEY` | *(empty)* | Alpha Vantage `OVERVIEW` fundamentals for the live ingestion path (keyed; optional). |
+| `FINNHUB_API_KEY` | *(empty)* | Finnhub `company-news` sentiment for the live ingestion path (keyed; optional). |
+| `MASSIVE_API_KEY` / `POLYGON_API_KEY` | *(empty)* | **Options chain** source. The options path targets **Massive/Polygon** (`api.massive.com`, Bearer) when a key is set; with no key it falls back to the **free CBOE delayed feed** automatically (no key needed). Store the token in the Settings dialog's encrypted LLM vault rather than here when possible. |
+| `DISABLE_MOCK_DATA` | `false` | When `true`, the ingestion path never falls back to seeded/mock data — live-source failures surface as empty + a visible warning instead of silent mock. |
+| `ENABLE_CRYPTO_AGENCY` | `false` | The `crypto-screener` agency is **hidden** by default (no real crypto universe/on-chain metrics yet). Set `true` to expose it in the agency selector. |
 
 Copy the template to get started:
 
@@ -98,9 +102,16 @@ The front-end is type-checked by Vite/Vitest via `tsconfig.frontend.json`
 ## Tests (with coverage)
 
 ```bash
-npm test              # backend jest (10 suites, 70 tests) + front-end vitest (14 files, ~99 tests)
+npm test              # backend jest (64 suites, ~560 tests) + front-end vitest (39 files, 322 tests)
 ```
 
+> Current green state: all **64 backend suites pass serially** (`npx jest
+> --runInBand` → 561 passed, 1 skipped) and **all 39 frontend files** pass
+> (322 tests). A few backend suites are environment-gated (need a writable
+> store path / `LLM_VAULT_PASSPHRASE` / a live news transport); they pass where
+> those are configured and are skipped or left out of the parallel run
+> otherwise. `npm rebuild better-sqlite3` may be needed once after install if
+> `llm-sqlite`/`llm-config` fail on a native ABI mismatch in your sandbox.
 - Backend tests live in `src/tests/*.test.ts` and cover each node's
   parsing/processing logic plus the config routes and the streaming
   `analysis_complete` (including the `analystTraces` drill-down payload).

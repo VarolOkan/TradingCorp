@@ -14,29 +14,33 @@ describe('resolveLiveOptionsBundle (Phase I gateway)', () => {
     expect(r.underlying_price).toBeGreaterThan(0);
   });
 
-  it('upgrades to live polygon + yahoo when a fetch transport + key are injected', async () => {
+  it('upgrades to live Massive/Polygon + yahoo when a fetch transport + key are injected', async () => {
     const fetchFn = async (url: string) => {
-      if (url.includes('polygon.io')) {
+      if (url.includes('massive.com') || url.includes('polygon.io')) {
+        const body = {
+          results: {
+            underlying_asset: { last_price: 190.5 },
+            results: [
+              {
+                details: { expiration_date: '2026-08-21', strike_price: 190, contract_type: 'call', open_interest: 1234 },
+                greeks: { implied_volatility: 0.32, last_price: 5.4 },
+                last_quote: { bid: 5.3, ask: 5.5 },
+              },
+              {
+                details: { expiration_date: '2026-08-21', strike_price: 190, contract_type: 'put', open_interest: 987 },
+                greeks: { implied_volatility: 0.34, last_price: 4.1 },
+                last_quote: { bid: 4.0, ask: 4.2 },
+              },
+            ],
+          },
+        };
         return {
           ok: true,
           status: 200,
-          json: async () => ({
-            results: {
-              underlying_asset: { last_price: 190.5 },
-              results: [
-                {
-                  details: { expiration_date: '2026-08-21', strike_price: 190, contract_type: 'call', open_interest: 1234 },
-                  greeks: { implied_volatility: 0.32, last_price: 5.4 },
-                  last_quote: { bid: 5.3, ask: 5.5 },
-                },
-                {
-                  details: { expiration_date: '2026-08-21', strike_price: 190, contract_type: 'put', open_interest: 987 },
-                  greeks: { implied_volatility: 0.34, last_price: 4.1 },
-                  last_quote: { bid: 4.0, ask: 4.2 },
-                },
-              ],
-            },
-          }),
+          // fetchOptionChain reads res.text() first (to capture provider error
+          // bodies verbatim), then JSON.parses it — so the mock MUST expose text().
+          text: async () => JSON.stringify(body),
+          json: async () => body,
         };
       }
       // Yahoo chart for price bars
