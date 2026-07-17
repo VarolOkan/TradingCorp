@@ -31,6 +31,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { spawnSync } from 'child_process';
 import type { LlmModelConfig, LlmRole } from './llm-config';
+import { logger } from '../utils/logger';
 
 const VAULT_VERSION = 1;
 
@@ -237,7 +238,7 @@ export class TokenVault {
     if (!this.cipher) return; // disabled
     // Guard: never clobber a file this process failed to read.
     if (this.vaultUnreadable) {
-      console.warn(
+      logger.warn(
         `[vault] refusing to overwrite ${this.filePath} — existing file was unreadable ` +
           `(vaultUnreadable set). A save here would drop all other persisted secrets. ` +
           `Fix the passphrase / re-key, then retry.`,
@@ -274,14 +275,14 @@ export function createVault(): TokenVault {
   const userId = resolveVaultUserId();
   const { cipher, reason } = selectCipher();
   if (!cipher) {
-    console.warn(`[vault] ${reason} Set LLM_VAULT_PASSPHRASE to enable encrypted token persistence.`);
+    logger.warn(`[vault] ${reason} Set LLM_VAULT_PASSPHRASE to enable encrypted token persistence.`);
   } else {
-    console.log(`[vault] token persistence enabled (${cipher.kind}) -> ${filePath}`);
+    logger.info(`[vault] token persistence enabled (${cipher.kind}) -> ${filePath}`);
   }
   const vault = new TokenVault(filePath, userId, cipher);
   vault.load();
   if (vault.vaultUnreadable) {
-    console.error(`[vault] UNREADABLE: ${vault.vaultUnreadable}`);
+    logger.error(`[vault] UNREADABLE: ${vault.vaultUnreadable}`);
   }
   return vault;
 }

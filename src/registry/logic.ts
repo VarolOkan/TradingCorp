@@ -54,7 +54,7 @@ const sharedSurface = makeNodeSurface();
  *  agencies diverge and the node can capture the analyst:done event. */
 export const ANALYST_LOGIC_REGISTRY: Record<string, AnalystFn> = {
   orchestrate: (s, t, surf) => orchestratorHandler(s, surf ?? sharedSurface, t),
-  ingest: (s, t, surf) => dataIngestionHandler(s, surf ?? sharedSurface, t),
+  ingest: (s, t, surf, acquired) => dataIngestionHandler(s, surf ?? sharedSurface, t, acquired?.finnhubKey, acquired?.alphaVantageKey),
   fundamentalAnalysis: (s, t, surf) => fundamentalHandler(s, surf ?? sharedSurface, t),
   technicalAnalysis: (s, t, surf) => technicalHandler(s, surf ?? sharedSurface, t),
   sentimentAnalysis: (s, t, surf) => sentimentHandler(s, surf ?? sharedSurface, t),

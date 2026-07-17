@@ -82,6 +82,8 @@ export async function dataIngestionHandler(
   state: AgentState,
   node: NodeSurface,
   tuning?: AnalystTuning,
+  finnhubKey?: string,
+  alphaVantageKey?: string,
 ): Promise<AgentState> {
   // Signal the UI wall that this analyst panel is now active.
   node.emitProgress(state, 'analyst:start', 'data_ingestion', { stage: 1, tickers: state.tickers });
@@ -115,10 +117,33 @@ export async function dataIngestionHandler(
       },
     };
 
-    const fetchImpl = async () => fetchFinancialData(input, undefined, profile);
+    const fetchImpl = async () => fetchFinancialData(input, undefined, profile, alphaVantageKey);
     const output: any = node.executeWithRetry
       ? await node.executeWithRetry(fetchImpl, 'data_ingestion', { tickers: state.tickers })
       : await fetchImpl();
+
+    // §4.9b — when a Finnhub key is configured, upgrade sentiment from the
+    // seeded parity default to REAL company-news. This makes the Sentiment
+    // analyst data-driven (ingested.sentiment[ticker].data_source =
+    // 'finnhub:live-news') instead of mocked. No key → falls through to the
+    // seeded default and the trace honestly marks sentiment seeded.
+    const sentimentData = { ...(output.sentiment_data ?? {}) };
+    const liveSentimentSources: string[] = [];
+    if (finnhubKey && typeof (globalThis as any).fetch === 'function') {
+      const fetchFn = (url: string, init: any) => (globalThis as any).fetch(url, init);
+      for (const ticker of state.tickers) {
+        try {
+          const news = await fetchCompanyNews(ticker, { finnhubKey, fetchFn: fetchFn as any });
+          if (news.source === 'finnhub' && news.headlines.length > 0) {
+            sentimentData[ticker] = { ...sentimentData[ticker], ...newsToIngestedSentiment(news) };
+            liveSentimentSources.push('Finnhub (live news)');
+          }
+        } catch {
+          /* keep seeded sentiment for this ticker on fetch failure */
+        }
+      }
+    }
+    output.sentiment_data = sentimentData;
 
     // Phase C: fetch the horizon-appropriate OHLCV bars for each ticker, reusing
     // hist.fetchPriceBars (Yahoo live + deterministic mock fallback). Stash on
@@ -151,7 +176,9 @@ export async function dataIngestionHandler(
       ? sourcesSeen.has('mock')
         ? 'mixed'
         : 'yahoo'
-      : 'mock';
+      : liveSentimentSources.length > 0
+        ? 'mixed'
+        : 'mock';
 
     const ingested = {
       bars: ingestedBars,
@@ -170,6 +197,8 @@ export async function dataIngestionHandler(
     for (const ticker of state.tickers) {
       const series = ingestedBars[ticker] ?? [];
       const market = ingestedMarket[ticker];
+      const fundLive = output.fundamental_data?.[ticker]?.fundamental_source === 'alphaVantage:OVERVIEW';
+      const sentLive = liveSentimentSources.length > 0 && output.sentiment_data?.[ticker]?.data_source?.includes('live');
       const blocks = [
         ...series.map((s) => ({
           domain: 'bars' as const,
@@ -178,13 +207,26 @@ export async function dataIngestionHandler(
           barsUsed: s.bars.length,
         })),
         ...(market ? [{ domain: 'market' as const, source: ingestedSource, rows: 1 }] : []),
-        ...(Object.keys(output.fundamental_data ?? {}).length ? [{ domain: 'fundamental' as const, source: 'seeded' }] : []),
-        ...(Object.keys(output.sentiment_data ?? {}).length ? [{ domain: 'sentiment' as const, source: 'seeded' }] : []),
+        ...(Object.keys(output.fundamental_data ?? {}).length
+          ? [{ domain: 'fundamental' as const, source: fundLive ? ('live' as const) : ('seeded' as const) }]
+          : []),
+        ...(Object.keys(output.sentiment_data ?? {}).length
+          ? [{
+              domain: 'sentiment' as const,
+              source: sentLive ? ('live' as const) : ('seeded' as const),
+            }]
+          : []),
       ];
       updatedState = recordDataReceived(updatedState, annotateDataReceived(
         'data_ingestion', ticker, 'ingested', blocks, provenance,
-        `collected ${series.length} interval(s) of bars + market meta; fundamental/sentiment seeded`,
+        `collected ${series.length} interval(s) of bars + market meta; fundamental ${fundLive ? 'live (Alpha Vantage OVERVIEW)' : 'seeded'}, sentiment ${sentLive ? 'live (Finnhub news)' : 'seeded'}`,
       ));
+    }
+
+    // Surface the live Finnhub news feed in the ingestion trace's source list
+    // (only when it actually returned headlines for this run).
+    if (liveSentimentSources.length > 0 && Array.isArray(output?.data_quality?.sources)) {
+      output.data_quality.sources = Array.from(new Set([...output.data_quality.sources, ...liveSentimentSources]));
     }
 
     updatedState = {
@@ -246,8 +288,11 @@ export async function dataIngestionHandler(
       notes: [
         `Horizon profile: ${tuningHorizon} → lookbackDays=${profile.lookbackDays}, intervals=[${profile.intervals.join(',')}], fundamentals=${profile.fundamentals}.`,
         ...(ingestedSource === 'mock'
-          ? ['Bars are deterministic mock (no live fetch available). Fundamental + sentiment remain seeded (Phase G wires live providers).']
-          : [`Bars source: ${ingestedSource}. Fundamental + sentiment remain seeded (Phase G wires live providers).`]),
+          ? ['Bars are deterministic mock (no live fetch available).']
+          : [`Bars source: ${ingestedSource}.`]),
+        ...(liveSentimentSources.length > 0
+          ? ['Sentiment driven by live Finnhub company-news (no social mock).']
+          : ['Fundamental + social remain seeded (no live provider wired yet — Phase G).']),
       ],
     });
 
@@ -271,8 +316,8 @@ export async function dataIngestionHandler(
   }
 }
 
-export async function fetchFinancialData(input: any, _fetchFn?: any, profile?: { intervals: BarInterval[]; lookbackDays: number }): Promise<any> {
-  return fetchRealFinancialData(input, _fetchFn, profile);
+export async function fetchFinancialData(input: any, _fetchFn?: any, profile?: { intervals: BarInterval[]; lookbackDays: number }, alphaVantageKey?: string): Promise<any> {
+  return fetchRealFinancialData(input, _fetchFn, profile, undefined, alphaVantageKey);
 }
 
 /**
@@ -336,11 +381,27 @@ function rsi(closes: number[], period = 14): number | null {
   return 100 - 100 / (1 + rs);
 }
 
+/** Map an Alpha Vantage OVERVIEW payload onto a FundamentalAnalyzer health
+ *  score (0-100), reusing the same banding as scoreFromRatios. */
+function scoreFromAvOverview(j: any): number {
+  const de = num(j.DebtEquityRatio) ?? 0.5;
+  const cr = num(j.CurrentRatio) ?? 1.2;
+  const roe = (num(j.ReturnOnEquityTTM) ?? 0) / 100;
+  const pm = (num(j.ProfitMargin) ?? 0) / 100;
+  let score = 60;
+  score += de < 0.5 ? 8 : -8;
+  score += cr > 1.5 ? 6 : cr < 1 ? -6 : 0;
+  score += roe > 0.15 ? 10 : roe < 0.05 ? -6 : 0;
+  score += pm > 0.2 ? 8 : pm < 0.05 ? -6 : 0;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
 export async function fetchRealFinancialData(
   input: any,
   fetchFn?: IngestionFetchFn,
   profile?: { intervals: BarInterval[]; lookbackDays: number },
   newsOpts?: { newsFetcher?: import('./news').NewsFetchFn; finnhubKey?: string },
+  alphaVantageKey?: string,
 ): Promise<any> {
   const doFetch =
     fetchFn ?? ((globalThis as any).fetch?.bind?.(globalThis) as IngestionFetchFn | undefined);
@@ -362,8 +423,49 @@ export async function fetchRealFinancialData(
   const lookbackDays = profile?.lookbackDays ?? 365;
 
   for (const ticker of input.tickers) {
+    // ---- Real Alpha Vantage OVERVIEW fundamentals (when a key is supplied) ----
+    // OVERVIEW returns balance-sheet ratios (DebtEquityRatio, CurrentRatio,
+    // ReturnOnEquityTTM, ReturnOnAssetsTTM, ProfitMargin, OperatingCashflow,
+    // MarketCapitalization, …) — exactly the shape the Fundamental analyst
+    // consumes. This is the genuine live source; the seeded block below is only
+    // a parity fallback when no key / fetch are available.
+    let liveFundamentals: Record<string, any> | null = null;
+    if (alphaVantageKey && typeof doFetch === 'function') {
+      try {
+        const url = `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(alphaVantageKey)}`;
+        const res = await doFetch(url);
+        if (res.ok) {
+          const j = await res.json().catch(() => ({} as any));
+          if (j && j.Symbol && j.DebtEquityRatio !== undefined) {
+            const fcfYield = (() => {
+              const ocf = num(j.OperatingCashflow);
+              const mcap = num(j.MarketCapitalization);
+              return ocf !== null && mcap && mcap > 0 ? ocf / mcap : null;
+            })();
+            liveFundamentals = {
+              fundamental_source: 'alphaVantage:OVERVIEW',
+              financial_health_score: num(j.ProfitMargin) !== null && num(j.ReturnOnEquityTTM) !== null
+                ? scoreFromAvOverview(j)
+                : undefined,
+              key_ratios: {
+                debt_to_equity: num(j.DebtEquityRatio) ?? 0,
+                current_ratio: num(j.CurrentRatio) ?? 0,
+                roe: (num(j.ReturnOnEquityTTM) ?? 0) / 100,
+                roa: (num(j.ReturnOnAssetsTTM) ?? 0) / 100,
+                profit_margin: (num(j.ProfitMargin) ?? 0) / 100,
+                free_cash_flow_yield: fcfYield !== null ? fcfYield : 0,
+              },
+            };
+          }
+        }
+      } catch {
+        /* fall through to seeded fundamental */
+      }
+    }
+
     // ---- Mock fallback seeds (fundamental, sentiment, missing market bits) ----
-    fundamental_data[ticker] = {
+    // Used only when no live fundamentals were retrieved above.
+    fundamental_data[ticker] = liveFundamentals ?? {
       balance_sheet: {
         total_assets: Math.floor(batchRng() * 100000) + 10000,
         total_liabilities: Math.floor(batchRng() * 50000) + 5000,
@@ -526,15 +628,20 @@ export async function fetchRealFinancialData(
       sourceLabels.push('Yahoo Finance (mock)');
     }
 
-    // Fundamental remains mock-only (no tokenless provider), but NEWS is now
-    // real when a Finnhub key + fetch are available: override sentiment_data so
-    // the sentiment analyst's `realSent` hook fires with genuine headlines.
+    // Fundamental is now REAL when an Alpha Vantage key + fetch are available
+    // (see OVERVIEW fetch at the top of the loop). NEWS is real when a Finnhub
+    // key + fetch are available — override sentiment_data so the sentiment
+    // analyst's `realSent` hook fires with genuine headlines.
+    if (liveFundamentals) {
+      sourceLabels.push('Alpha Vantage (live fundamentals)');
+      liveSources.push('alphaVantage');
+    }
     if (newsOpts?.newsFetcher || (typeof (globalThis as any).fetch === 'function' && (newsOpts?.finnhubKey || (process as any).env?.FINNHUB_KEY))) {
       try {
-        const news = await fetchCompanyNews(ticker, {
-          ...(newsOpts?.newsFetcher ? { fetchFn: newsOpts.newsFetcher } : {}),
-          ...(newsOpts?.finnhubKey ? { finnhubKey: newsOpts.finnhubKey } : {}),
-        });
+        const news = await fetchCompanyNews(
+          ticker,
+          { finnhubKey: newsOpts?.finnhubKey, fetchFn: (globalThis as any).fetch as any },
+        );
         if (news.source === 'finnhub' && news.headlines.length > 0) {
           sentiment_data[ticker] = {
             ...sentiment_data[ticker],
@@ -548,11 +655,10 @@ export async function fetchRealFinancialData(
         sourceLabels.push('Finnhub (mock news)');
       }
     }
-    // Fundamental + sentiment-social remain mock-only (no tokenless provider).
-    sourceLabels.push('Alpha Vantage (mock)');
   }
 
-  const yahooLive = liveSources.length > 0;
+  const yahooLive = liveSources.includes('yahoo');
+  const avLive = liveSources.includes('alphaVantage');
   return {
     fundamental_data,
     technical_data,
@@ -562,7 +668,7 @@ export async function fetchRealFinancialData(
       completeness: yahooLive ? 100 : Math.floor(batchRng() * 20) + 80,
       freshness: yahooLive ? 0 : Math.floor(batchRng() * 24),
       sources: Array.from(new Set(sourceLabels)),
-      liveSources: yahooLive ? ['yahoo'] : [],
+      liveSources: Array.from(new Set(liveSources)),
     },
     errors: [],
   };

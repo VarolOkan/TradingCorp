@@ -23,6 +23,7 @@ import fs from 'fs';
 import path from 'path';
 import { buildReportModel, buildRawDataDump, renderMarkdown, renderHtml, renderPdfBuffer } from './report';
 import { AGENCY_IDS } from '../registry/agencies';
+import { logger } from '../utils/logger';
 
 const REPORTS_ROOT = (() => {
   // Allow tests / container mounts to redirect the reports dir.
@@ -359,9 +360,4 @@ function summary(r: ReportRecord) {
   };
 }
 
-// Local logger shim (avoids an import cycle with utils/logger for this module).
-const logger = {
-  error: (m: string) => console.error(`[reports] ${m}`),
-  warn: (m: string) => console.warn(`[reports] ${m}`),
-  info: (m: string) => console.log(`[reports] ${m}`),
-};
+// Use the shared logger (no import cycle: utils/logger only depends on config).

@@ -370,10 +370,11 @@ class AnalysisServer {
         timestamp: new Date().toISOString()
       });
 
-      // Self-documenting diagnostic: prove at a glance whether the banner is
-      // correct or whether the running process is stale code. If sourcesOk>0
-      // yet mockDisabled=true, the server is NOT running the patched emit path.
-      logger.info(
+      // Self-documenting diagnostic (debug-level: off unless LOG_LEVEL=DEBUG).
+      // Proves at a glance whether the banner is correct or whether the running
+      // process is stale code. If sourcesOk>0 yet mockDisabled=true, the server
+      // is NOT running the patched emit path.
+      logger.debug(
         `[mockDisabled gate] mockDisabled=${shouldShowMockDisabledBanner(normalized.dataHealth)} ` +
           `sourcesOk=${normalized.dataHealth?.sourcesOk ?? 0} ` +
           `sourcesTotal=${normalized.dataHealth?.sourcesTotal ?? 0} ` +

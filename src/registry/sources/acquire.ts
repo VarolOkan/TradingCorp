@@ -48,11 +48,11 @@ export type FetchFn = (
 
 export interface AcquireContext {
   /** Injected transport. Defaults to a node/browser global fetch adapter. */
-  fetchFn?: FetchFn;
+  fetchFn?: FetchFn | undefined;
   /** The ticker being analyzed (substitutes {ticker}/{symbol} in endpoints). */
-  ticker?: string;
+  ticker?: string | undefined;
   /** Connection config (token attachment). Optional. */
-  runtimeConfig?: { baseUri: string; accessToken: string; extra: Record<string, string> } | null;
+  runtimeConfig?: { baseUri: string; accessToken: string; extra: Record<string, string> } | null | undefined;
   /**
    * Per-source token resolver (B1). Given a source id, returns that source's
    * own credential (from the server-side AnalystConfigStore), or undefined to
@@ -60,7 +60,15 @@ export interface AcquireContext {
    * attach a DIFFERENT api key per external source while the global token
    * remains the fallback. The token is never logged/echoed by this module.
    */
-  resolveToken?: (sourceId: string) => string | undefined;
+  resolveToken?: ((sourceId: string) => string | undefined) | undefined;
+  /**
+   * Resolved Finnhub API key for the live `company-news` sentiment feed.
+   * The ingestion handler consumes this to populate `ingested.sentiment`
+   * with REAL headlines instead of seeded random data. Present only when a
+   * Finnhub token is configured; otherwise `undefined` (handler falls back
+   * to seeded sentiment, and the UI honestly labels it as such).
+   */
+  finnhubKey?: string | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;

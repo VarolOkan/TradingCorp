@@ -18,7 +18,7 @@ import { AgentState } from '../types/financial-analysis';
 import type { AnalystDef, AnalysisHorizon, AnalystTuning } from '../types/registry';
 import { getLogicHandler } from '../registry/logic';
 import { makeNodeSurface, type NodeSurface } from '../registry/logic/shared';
-import { acquireForAnalyst, aggregateDataHealth, isLiveSource, type AcquireContext } from '../registry/sources';
+import { acquireForAnalyst, aggregateDataHealth, isLiveSource, type AcquireContext, type AnalystAcquisition } from '../registry/sources';
 import { declarativeHandler } from '../registry/logic/declarative';
 import { analystConfigStore } from '../server/analyst-config';
 import { runAnalystLLM } from '../registry/logic/llm';
@@ -67,16 +67,17 @@ export class GenericAnalystNode {
       params: this.def.params ?? {},
     };
 
-    // Capture the handler's `analyst:done` payload so the node emits the done
-    // event EXACTLY ONCE (enriched with acquisition metadata below). Handlers
-    // emit `analyst:done` themselves; without capture we'd emit a second time
-    // whenever the analyst has live sources. `analyst:start` passes through.
-    let capturedDone: { analyst: string; payload: Record<string, any> } | null = null;
+    // capturedDone is held in a mutable container (not a `let`) because TS's
+    // control-flow analysis does not track assignments made inside a deferred
+    // closure, which would otherwise narrow the variable to `never`.
+    const captureHolder: { done: { analyst: string; payload: Record<string, any> } | null } = {
+      done: null,
+    };
     const surface: NodeSurface = {
       ...this.surface,
       emitProgress: (s, event, analyst, extra) => {
         if (event === 'analyst:done') {
-          capturedDone = { analyst: String(analyst), payload: (extra as Record<string, any>) ?? {} };
+          captureHolder.done = { analyst: String(analyst), payload: (extra as Record<string, any>) ?? {} };
           return;
         }
         this.surface.emitProgress(s, event, analyst, extra);
@@ -92,9 +93,17 @@ export class GenericAnalystNode {
     //      can be passed into ingestion handlers (which consume live payloads).
     //      No-op for declarative/mock-only analysts → legacy parity preserved.
     const sources = (this.def.dataSources ?? []).filter(isLiveSource);
-    const acquisition = sources.length > 0
-      ? await acquireForAnalyst(this.def, this.buildAcquireContext(state))
+    const ctx = this.buildAcquireContext(state);
+    const acquisition: AnalystAcquisition | null = sources.length > 0
+      ? await acquireForAnalyst(this.def, ctx)
       : null;
+    // Attach the resolved Finnhub key so the ingestion handler can fetch live
+    // company-news for the Sentiment analyst (keeps it data-driven, not seeded).
+    if (acquisition && ctx.finnhubKey) acquisition.finnhubKey = ctx.finnhubKey;
+    // Attach the resolved Alpha Vantage key so the ingestion handler can fetch
+    // live OVERVIEW fundamentals for the Fundamental analyst (real ratios, not
+    // seeded), gated on the alphaVantage source token being configured.
+    if (acquisition && ctx.alphaVantageKey) acquisition.alphaVantageKey = ctx.alphaVantageKey;
 
     let updated: AgentState;
     if (this.def.logic.mode === 'declarative') {
@@ -208,7 +217,8 @@ export class GenericAnalystNode {
     }
 
     // 3) Emit `analyst:done` exactly once, enriched with acquisition metadata.
-    const donePayload: Record<string, any> = { ...(capturedDone?.payload ?? {}) };
+    const captured = captureHolder.done;
+    const donePayload: Record<string, any> = captured ? { ...captured.payload } : {};
     if (acquisition) {
       donePayload.degraded = acquisition.degraded || acquisition.usedMockFallback || acquisition.hardFailed;
       donePayload.sources = {
@@ -247,6 +257,18 @@ export class GenericAnalystNode {
           { sessionId, analystId: this.def.id, sourceId },
           state.runtimeConfig?.accessToken,
         ),
+      // Finnhub key for the live company-news sentiment feed (consumed by the
+      // data_ingestion handler to populate ingested.sentiment with REAL news).
+      finnhubKey: analystConfigStore.resolveToken(
+        { sessionId, analystId: this.def.id, sourceId: 'finnhub' },
+        state.runtimeConfig?.accessToken,
+      ) as string | undefined,
+      // Alpha Vantage key for the live OVERVIEW fundamental feed (consumed by
+      // the data_ingestion handler to populate ingested.fundamental with REAL ratios).
+      alphaVantageKey: analystConfigStore.resolveToken(
+        { sessionId, analystId: this.def.id, sourceId: 'alphaVantage' },
+        state.runtimeConfig?.accessToken,
+      ) as string | undefined,
     };
   }
 }

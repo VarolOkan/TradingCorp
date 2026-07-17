@@ -81,9 +81,10 @@ describe('DATA_DIR relocates llm-config.json + writes are traced', () => {
     }
   });
 
-  it('every write to llm-config.json is traced to the server log with a stack + content', () => {
-    // Spy on the shared logger's warn so we capture the audit lines synchronously
-    // (the file stream is async and would be racy to read back).
+  it('writes to llm-config.json are silent (no server-log trace)', () => {
+    // Per user instruction: the model name has not changed since the data
+    // directory was repointed, so the per-write audit trace on the json-store
+    // is dead weight. Verify flush() persists WITHOUT emitting a log line.
     const { logger } = require('../utils/logger');
     const spy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     try {
@@ -94,13 +95,12 @@ describe('DATA_DIR relocates llm-config.json + writes are traced', () => {
         baseUrl: 'https://openrouter.ai/api/v1',
         model: 'claude-3.5-sonnet',
       });
-      const logged = spy.mock.calls.map((c) => String(c[0])).join('\n');
-      // The audit tag is present...
-      expect(logged).toContain('[LLM-CONFIG-WRITE]');
-      // ...with a stack trace (at least one frame)...
-      expect(logged).toMatch(/LLM-CONFIG-WRITE\] writing .* stack:/);
-      // ...and the persisted content (the model we just saved).
-      expect(logged).toContain('claude-3.5-sonnet');
+      const logged = spy.mock.calls.map((c: any[]) => String(c[0])).join('\n');
+      // The audit tag must NOT appear — writes are silent now.
+      expect(logged).not.toContain('[LLM-CONFIG-WRITE]');
+      // Sanity: the model was actually persisted to disk.
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      expect(saved.roles.default['scanner'].model).toBe('claude-3.5-sonnet');
     } finally {
       spy.mockRestore();
     }

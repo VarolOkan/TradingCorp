@@ -6,6 +6,7 @@ import { Server, Socket } from 'socket.io';
 import { AgentState } from '../types/financial-analysis';
 import { buildLegacyGraph } from '../orchestration/financial-graph';
 import { shouldShowMockDisabledBanner } from '../registry/logic/mockMode';
+import { logger } from '../utils/logger';
 
 /**
  * Socket.IO server for real-time financial analysis updates
@@ -36,7 +37,7 @@ class AnalysisSocketServer {
    */
   private setupConnectionHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
-      console.log('Client connected:', socket.id);
+      logger.info('Client connected:', socket.id);
       
       // Handle analysis request from client
       socket.on('request_analysis', (data: { tickers: string[]; options?: any }) => {
@@ -45,7 +46,7 @@ class AnalysisSocketServer {
       
       // Handle client disconnection
       socket.on('disconnect', () => {
-        console.log('Client disconnected:', socket.id);
+        logger.info('Client disconnected:', socket.id);
       });
     });
   }

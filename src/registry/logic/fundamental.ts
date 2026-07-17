@@ -73,6 +73,44 @@ export async function fundamentalHandler(
       }
     }
 
+    // Honest provenance: classify what each ticker actually consumed so the
+    // trace note reflects truth (a hardcoded "Mock data" label is a BUG — it
+    // stays even when live fundamentals are supplied upstream).
+    type FundMode = 'live' | 'proxy' | 'seeded';
+    const modes: FundMode[] = state.tickers.map((t) => {
+      const ds = (analyses[t]?.data_source as string | undefined) ?? '';
+      if (ds.includes('live-fundamentals')) return 'live';
+      if (ds.includes('price-proxy')) return 'proxy';
+      return 'seeded';
+    });
+    const anyLive = modes.includes('live');
+    const anyProxy = modes.includes('proxy');
+    const anySeeded = modes.includes('seeded');
+
+    // Honest input source labels (no more "Finnhub (mock)" fiction).
+    const inputSources: string[] = [];
+    if (anyLive) inputSources.push('Alpha Vantage / Yahoo (live fundamentals)');
+    if (anyProxy) inputSources.push('Yahoo Finance (price-action proxy)');
+    if (anySeeded) inputSources.push('seeded parity fallback');
+    if (inputSources.length === 0) inputSources.push('seeded parity fallback');
+
+    // Honest, semantically-correct trace notes.
+    const honestNotes: string[] = [];
+    if (anyLive && !anyProxy && !anySeeded) {
+      honestNotes.push('Fundamentals from live market data (Alpha Vantage / Yahoo). Findings are auditable.');
+    } else if (anyProxy && !anyLive && !anySeeded) {
+      honestNotes.push('No fundamental feed configured — ran on a price-action proxy (trend + volatility). Indicative, not auditable; wire Alpha Vantage OVERVIEW for full balance-sheet ratios.');
+    } else if (anySeeded && !anyLive && !anyProxy) {
+      honestNotes.push('No fundamental feed configured — ran on seeded parity fallback. Wire a live source (Alpha Vantage OVERVIEW) to make findings auditable.');
+    } else {
+      // Mixed: report exactly which paths fired.
+      const parts: string[] = [];
+      if (anyLive) parts.push('live fundamentals for some tickers');
+      if (anyProxy) parts.push('price-proxy for some tickers');
+      if (anySeeded) parts.push('seeded fallback for some tickers');
+      honestNotes.push(`Mixed inputs (${parts.join('; ')}). Wire Alpha Vantage OVERVIEW for full auditable fundamentals across all tickers.`);
+    }
+
     updatedState = {
       ...updatedState,
       messages: [
@@ -96,7 +134,7 @@ export async function fundamentalHandler(
         ticker,
         label: 'Fundamental data ingested',
         data: summarizeFundamentalInput(analyses[ticker]),
-        sources: ['Yahoo Finance', 'Alpha Vantage', 'Finnhub (mock)'],
+        sources: inputSources,
       })),
       weighting: [
         { label: 'Leverage & liquidity discipline', inputs: ['debt_to_equity', 'current_ratio'], weight: 0.4, rationale: 'High D/E and low current ratio are penalized as balance-sheet risk.', contribution: 40, scale: '0..100 score weight' },
@@ -109,7 +147,7 @@ export async function fundamentalHandler(
         summary: generateAnalysisSummary(analyses),
         details: { analyses },
       },
-      notes: ['Mock data — replace performFundamentalAnalysis with a real data source to make findings auditable.'],
+      notes: honestNotes,
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'fundamental', { stage: 2, tickers: state.tickers, summary: generateAnalysisSummary(analyses) });

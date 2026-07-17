@@ -358,7 +358,7 @@ export function createRegistryStore(): RegistryStore {
     sqlite.listUsers(); // forces ensure() -> loads the native binding
     return sqlite;
   } catch (err) {
-    console.error(
+    logger.error(
       '[registry] better-sqlite3 unavailable at boot (likely ABI mismatch) — ' +
       'falling back to JSON store (.data/registry-*.json). ' +
       'Run `npm rebuild better-sqlite3` to restore SQLite persistence.',
@@ -385,6 +385,7 @@ export function inMemorySqlite(userIdIgnored = 'default'): RegistrySqliteStore {
 
 import { AGENCIES } from '../registry/agencies';
 import { ANALYST_DEFS } from '../registry/analysts';
+import { logger } from '../utils/logger';
 
 // Pristine compiled snapshots, captured ONCE at module load (before any
 // override mutation). applyOverridesToRegistry resets to these each call so a

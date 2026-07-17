@@ -23,6 +23,8 @@
 // from Yahoo's quoteSummary endpoint via a tokenless crumb dance; when that
 // call is unavailable the fields are simply null and the UI omits them.
 
+import { logger } from '../utils/logger';
+
 export interface QuoteResult {
   symbol: string;
   name: string | null;
@@ -160,7 +162,7 @@ export function makeYahooFundFetch(): FundFetchFn {
         },
       };
     } catch (err) {
-      console.warn(`[quote] fundamentals fetch error: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(`[quote] fundamentals fetch error: ${err instanceof Error ? err.message : String(err)}`);
       return { ok: false, status: 0, text: async () => '', json: async () => ({}) };
     }
   };
@@ -216,7 +218,7 @@ export async function fetchFundamentals(symbol: string, fundFetch: FundFetchFn):
     if (!crumb || crumb.length === 0) {
       // Yahoo blocked the crumb (rate-limit / consent wall). Fundamentals are
       // omitted gracefully; surface a server-log hint for diagnosis.
-      console.warn(`[quote] fundamentals crumb unavailable for ${sym} (status ${crumbRes.status}); fundamentals omitted`);
+      logger.warn(`[quote] fundamentals crumb unavailable for ${sym} (status ${crumbRes.status}); fundamentals omitted`);
       return empty;
     }
     // 3) Pull the four modules we need.

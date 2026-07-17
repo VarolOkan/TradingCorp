@@ -177,4 +177,55 @@ describe('Data Ingestion handler', () => {
       expect(out.technical_data.AAPL.indicators.sma_20).toBeDefined();
     });
   });
+
+  describe('fetchRealFinancialData (Phase B — live Alpha Vantage OVERVIEW fundamentals)', () => {
+    const overviewJson = {
+      Symbol: 'AAPL',
+      DebtEquityRatio: '1.45',
+      CurrentRatio: '0.88',
+      ReturnOnEquityTTM: '147',
+      ReturnOnAssetsTTM: '22',
+      ProfitMargin: '24',
+      OperatingCashflow: '110000000000',
+      MarketCapitalization: '3000000000000',
+    };
+    const avFetch = async () => ({ ok: true, status: 200, json: async () => overviewJson });
+
+    it('pulls REAL fundamental ratios when an Alpha Vantage key is supplied', async () => {
+      const out = await fetchRealFinancialData(
+        { tickers: ['AAPL'] },
+        avFetch as any,
+        undefined,
+        undefined,
+        'AV_TEST_KEY',
+      );
+      const kr = out.fundamental_data.AAPL.key_ratios;
+      expect(kr.debt_to_equity).toBeCloseTo(1.45, 2);
+      expect(kr.current_ratio).toBeCloseTo(0.88, 2);
+      expect(kr.roe).toBeCloseTo(1.47, 2); // API returns 147 → 1.47
+      expect(kr.profit_margin).toBeCloseTo(0.24, 2);
+      expect(out.fundamental_data.AAPL.fundamental_source).toBe('alphaVantage:OVERVIEW');
+      // Honest source labelling — NOT the old "Alpha Vantage (mock)".
+      expect(out.data_quality.sources).toContain('Alpha Vantage (live fundamentals)');
+      expect(out.data_quality.sources).not.toContain('Alpha Vantage (mock)');
+      expect(out.data_quality.liveSources).toContain('alphaVantage');
+    });
+
+    it('falls back to seeded fundamentals when no key is supplied', async () => {
+      const out = await fetchRealFinancialData({ tickers: ['AAPL'] }, avFetch as any);
+      // No key → no live fundamentals; seeded shape present, no AV label.
+      expect(out.fundamental_data.AAPL.fundamental_source).toBeUndefined();
+      expect(out.data_quality.sources).not.toContain('Alpha Vantage (live fundamentals)');
+      expect(out.data_quality.liveSources).not.toContain('alphaVantage');
+      // Seeded shape still structurally valid.
+      expect(out.fundamental_data.AAPL.key_ratios).toBeDefined();
+    });
+
+    it('falls back to seeded fundamentals when OVERVIEW returns no ratios', async () => {
+      const emptyFetch = async () => ({ ok: true, status: 200, json: async () => ({ Note: 'Thank you for using Alpha Vantage!' }) });
+      const out = await fetchRealFinancialData({ tickers: ['AAPL'] }, emptyFetch as any, undefined, undefined, 'AV_TEST_KEY');
+      expect(out.fundamental_data.AAPL.fundamental_source).toBeUndefined();
+      expect(out.data_quality.liveSources).not.toContain('alphaVantage');
+    });
+  });
 });

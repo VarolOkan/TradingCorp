@@ -24,6 +24,7 @@ import { AgencyDef, resolveAnalystDef, AnalystDef, AnalysisHorizon } from '../ty
 import { ANALYST_DEFS } from '../registry/analysts';
 import { isLiveSource } from '../registry/sources';
 import { mergeDataReceived } from '../registry/logic/shared';
+import { logger } from '../utils/logger';
 
 // The graph state schema is identical to the legacy graph so that the same
 // channels (messages, progress, analystTraces, runtimeConfig, ...) survive.
@@ -263,7 +264,7 @@ export class AgencyGraph {
     try {
       return await this.workflow.invoke(initialState);
     } catch (error) {
-      console.error(`[${this.agencyId}] workflow execution failed:`, error);
+      logger.error(`[${this.agencyId}] workflow execution failed:`, error);
       return {
         ...initialState,
         error: error instanceof Error ? error.message : String(error),

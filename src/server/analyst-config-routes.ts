@@ -148,11 +148,6 @@ export function registerAnalystConfigRoutes(
     // Prefer the stored token (vault) so Test works with a blank field.
     const stored = store.get({ sessionId, analystId, sourceId });
     const token = stored?.token ?? '';
-    // DIAGNOSTIC (temporary): log what we resolved without leaking the secret.
-    console.log(
-      `[analyst-config/test] sessionId=${sessionId} analystId=${analystId} sourceId=${sourceId} ` +
-      `tokenFound=${token.length > 0} uri=${stored?.extra?.uri ?? '(none)'}`,
-    );
     if (!token) {
       res.status(200).json({
         ok: false,
@@ -216,7 +211,7 @@ export async function probeSource(opts: {
   // DIAGNOSTIC (temporary): log the resolved URL with the token redacted, the
   // auth mode used, and the provider's response so we can see why a probe fails.
   const logUrl = url.replace(/apikey=[^&]+/i, 'apikey=***REDACTED***');
-  console.log(
+  logger.debug(
     `[probeSource] source=${source.id ?? source.label} auth=${source.auth} ` +
     `url=${logUrl} willSendHeader=${source.auth === 'finnhub' ? 'X-Finnhub-Token' : source.auth === 'bearer' ? 'Authorization' : 'none'}`,
   );
@@ -231,8 +226,8 @@ export async function probeSource(opts: {
     const status = resp.status;
     const txt = await resp.text().catch(() => '');
     const detail = txt.slice(0, 300) || undefined;
-    // DIAGNOSTIC: echo the provider's body (status + clipped) to the server log.
-    console.log(`[probeSource] response status=${status} latency=${latencyMs}ms body=${txt.slice(0, 300)}`);
+    // Observability: log the provider's response (status + clipped body) at debug level.
+    logger.debug(`[probeSource] response status=${status} latency=${latencyMs}ms body=${txt.slice(0, 300)}`);
     if (status >= 200 && status < 300) {
       return { ok: true, status, detail, latencyMs };
     }

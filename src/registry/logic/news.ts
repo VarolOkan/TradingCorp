@@ -277,7 +277,7 @@ function mergeHeadlines(yahoo: NewsHeadline[], google: NewsHeadline[]): NewsHead
  */
 export async function fetchCompanyNews(
   symbol: string,
-  opts: { fetchFn?: NewsFetchFn; finnhubKey?: string } = {},
+  opts: { fetchFn?: NewsFetchFn | undefined; finnhubKey?: string | undefined } = {},
 ): Promise<NewsResult> {
   const ticker = symbol.trim().toUpperCase();
   const key = opts.finnhubKey ?? (typeof process !== 'undefined' ? (process as any).env?.FINNHUB_KEY : undefined);

@@ -2,6 +2,8 @@
 // Retry and fallback strategies for the financial analysis pipeline
 // Enhances patterns seen in the TradingAgents implementation
 
+import { logger } from './logger';
+
 /**
  * Configuration for retry behavior
  */
@@ -295,17 +297,17 @@ export class DataIngestionRetryHandler extends RetryHandler {
       // Try primary operation with retry
       return await this.executeWithRetry(primaryOperation, operationName, context);
     } catch (primaryError) {
-      console.warn(`Primary operation failed for ${operationName}:`, primaryError);
+      logger.warn(`Primary operation failed for ${operationName}:`, primaryError);
       
       // Try fallback operation
       try {
         const fallbackResult = await fallbackOperation();
         if (fallbackResult !== null) {
-          console.log(`Using fallback data for ${operationName}`);
+          logger.info(`Using fallback data for ${operationName}`);
           return fallbackResult;
         }
       } catch (fallbackError) {
-        console.error(`Fallback operation also failed for ${operationName}:`, fallbackError);
+        logger.error(`Fallback operation also failed for ${operationName}:`, fallbackError);
       }
       
       // If both fail, throw the original error
@@ -348,14 +350,14 @@ export class AnalysisRetryHandler extends RetryHandler {
       // Try full analysis
       return await this.executeWithRetry(primaryOperation, operationName, context);
     } catch (error) {
-      console.warn(`Primary analysis failed for ${operationName}:`, error);
+      logger.warn(`Primary analysis failed for ${operationName}:`, error);
       
       try {
         // Try degraded/faster analysis
-        console.log(`Attempting degraded analysis for ${operationName}`);
+        logger.info(`Attempting degraded analysis for ${operationName}`);
         return await this.executeWithRetry(degradedOperation, `${operationName}_degraded`, context);
       } catch (degradedError) {
-        console.error(`Degraded analysis also failed for ${operationName}:`, degradedError);
+        logger.error(`Degraded analysis also failed for ${operationName}:`, degradedError);
         
         // Return minimal viable result as last resort
         throw new Error(`Analysis failed for ${operationName}: ${(error as Error).message}`);

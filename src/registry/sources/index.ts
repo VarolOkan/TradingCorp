@@ -37,6 +37,18 @@ export interface AnalystAcquisition {
   authError: boolean;
   /** Merged field data across all ok sources. */
   merged: Record<string, any>;
+  /**
+   * Resolved Finnhub API key for the live `company-news` sentiment feed,
+   * attached by GenericAnalystNode when this analyst is the ingestion node.
+   * The handler uses it to populate `ingested.sentiment` with REAL news.
+   */
+  finnhubKey?: string;
+  /**
+   * Resolved Alpha Vantage API key for the live `OVERVIEW` fundamental feed,
+   * attached by GenericAnalystNode when this analyst is the ingestion node.
+   * The handler uses it to populate `ingested.fundamental` with REAL ratios.
+   */
+  alphaVantageKey?: string;
 }
 
 const EMPTY: AnalystAcquisition = {

@@ -28,6 +28,7 @@ import {
 // Pristine compiled analyst snapshot (before any override) — used to guard
 // against editing/deleting built-in analysts. Defined in registry-store.ts.
 import { COMPILED_ANALYST_DEFS } from './registry-store';
+import { logger } from '../utils/logger';
 
 export interface AgencySummary {
   id: string;
@@ -110,8 +111,7 @@ export function registerRegistryRoutes(
     // different Node ABI → ERR_DLOPEN_FAILED) must not take down the whole
     // server. Start with the compiled registry and warn loudly so it's clear
     // that persistence is OFFLINE until the driver is fixed.
-    // eslint-disable-next-line no-console
-    console.error(
+    logger.error(
       '[registry] boot-merge FAILED — starting with COMPILED defaults (persistence OFFLINE):',
       err instanceof Error ? err.message : String(err),
     );

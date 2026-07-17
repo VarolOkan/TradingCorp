@@ -34,17 +34,20 @@ export async function sentimentHandler(
     }
 
     const analyses: Record<string, SentimentAnalysis> = {};
+    let usedLiveSentiment = false;
     for (const ticker of state.tickers) {
       analyses[ticker] = performSentimentAnalysis(ticker, tuning, state.ingested);
-      // Phase R2 (RAW_DATA_DUMP.md): record which ingested slice sentiment consumed.
-      const ingested = state.ingested;
-      const realSent = ingested?.sentiment?.[ticker];
+      const realSent = state.ingested?.sentiment?.[ticker];
+      if (realSent && typeof realSent.data_source === 'string' && realSent.data_source.includes('live')) {
+        usedLiveSentiment = true;
+      }
       if (realSent && typeof realSent === 'object' && typeof realSent.sentiment_score === 'number') {
+        const live = typeof realSent.data_source === 'string' && realSent.data_source.includes('live');
         updatedState = recordDataReceived(updatedState, annotateDataReceived(
           'sentiment', ticker, 'ingested',
-          [{ domain: 'sentiment', source: ingested!.source }],
-          ingested!.source === 'mixed' ? 'mixed' : ingested!.source === 'mock' ? 'mock' : 'live',
-          'live sentiment supplied upstream',
+          [{ domain: 'sentiment', source: live ? 'live' : 'seeded' }],
+          live ? 'live' : 'seeded-parity',
+          live ? 'live sentiment supplied upstream' : 'seeded sentiment supplied upstream',
         ));
       } else {
         updatedState = recordDataReceived(updatedState, annotateDataReceived(
@@ -86,7 +89,9 @@ export async function sentimentHandler(
           news_count: analyses[ticker]?.key_news?.length,
           social_mentions: analyses[ticker]?.social_trends?.length,
         },
-        sources: ['Finnhub news', 'Reddit/Twitter (social, mock)', 'Analyst consensus feeds'],
+        sources: analyses[ticker]?.social_trends && analyses[ticker]?.data_source?.includes('live')
+          ? ['Finnhub company-news (live)']
+          : ['Finnhub company-news (live)', 'Social (proxy from news)'],
       })),
       weighting: [
         { label: 'News posture', inputs: ['news_sentiment', 'key_news'], weight: 0.35, rationale: 'Curated news is the most reliable signal of fundamental narrative.', contribution: 35, scale: '0..100 score weight' },
@@ -99,7 +104,9 @@ export async function sentimentHandler(
         summary: generateAnalysisSummary(analyses),
         details: { analyses },
       },
-      notes: ['Social volume is mocked; divergent news vs social is surfaced as a watch item.'],
+      notes: usedLiveSentiment
+        ? ['Sentiment driven by live Finnhub company-news; divergent news vs social is surfaced as a watch item.']
+        : ['No live news feed configured — sentiment ran on seeded fallback; divergent news vs social is surfaced as a watch item.'],
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'sentiment', {

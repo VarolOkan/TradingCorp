@@ -29,6 +29,7 @@ import type {
 } from '../../types/financial-analysis';
 import { stringToSeed, seededRandom } from './shared';
 import { bsPrice, bsGreeks, yearsToExpiry, resolveRfr, DEFAULT_RFR } from './greeks';
+import { logger } from '../../utils/logger';
 
 /**
  * The shared seededRandom LCG can emit values outside [0,1) on its early calls
@@ -680,7 +681,7 @@ async function fetchYahooOptionChain(
 ): Promise<OptionChainResult | null> {
   const fetchFn = gf ?? ((globalThis as any).fetch as ((url: string, init?: any) => Promise<any>) | undefined);
   if (typeof fetchFn !== 'function') {
-    console.warn(`[options] Yahoo fallback skipped for ${ticker}: no fetch transport available (globalThis.fetch undefined and no injected fetchFn).`);
+    logger.warn(`[options] Yahoo fallback skipped for ${ticker}: no fetch transport available (globalThis.fetch undefined and no injected fetchFn).`);
     return null;
   }
   try {
@@ -698,7 +699,7 @@ async function fetchYahooOptionChain(
     });
     const crumb = (await crumbRes.text()).trim();
     if (!crumb) {
-      console.warn(`[options] Yahoo fallback failed for ${ticker}: crumb endpoint returned empty (status ${crumbRes.status}). Falling back to MOCK.`);
+      logger.warn(`[options] Yahoo fallback failed for ${ticker}: crumb endpoint returned empty (status ${crumbRes.status}). Falling back to MOCK.`);
       return null;
     }
     // 3) options chain (retry on 429)
@@ -708,14 +709,14 @@ async function fetchYahooOptionChain(
       { 'User-Agent': YAHOO_UA, ...(cookie ? { Cookie: cookie } : {}) },
     );
     if (!res) {
-      console.warn(`[options] Yahoo fallback failed for ${ticker}: options request returned no response (network/timeout). Falling back to MOCK.`);
+      logger.warn(`[options] Yahoo fallback failed for ${ticker}: options request returned no response (network/timeout). Falling back to MOCK.`);
       return null;
     }
     if (!res.ok) {
       // v7/finance/options is aggressively rate-limited (HTTP 429). Fall back to
       // the quoteSummary optionChain module (v10), which returns the SAME nested
       // options[].calls/puts shape and is usually not rate-limited as hard.
-      console.warn(`[options] Yahoo v7 options HTTP ${res.status} for ${ticker}; trying quoteSummary optionChain module instead.`);
+      logger.warn(`[options] Yahoo v7 options HTTP ${res.status} for ${ticker}; trying quoteSummary optionChain module instead.`);
       const qsUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker.toUpperCase())}?modules=optionChain&crumb=${encodeURIComponent(crumb)}`;
       const qsRes = await fetchWithRetry(
         fetchFn,
@@ -728,23 +729,23 @@ async function fetchYahooOptionChain(
         const adapted = { optionChain: { result: [{ quote: qsPayload?.quoteSummary?.result?.[0]?.price ?? {}, options: qsPayload?.quoteSummary?.result?.[0]?.optionChain?.options ?? [] }] } };
         const parsedQs = parseYahooOptions(ticker, adapted);
         if (parsedQs) {
-          console.log(`[options] Yahoo quoteSummary fallback OK for ${ticker}: ${parsedQs.quotes.length} quotes (source=${parsedQs.source}).`);
+          logger.info(`[options] Yahoo quoteSummary fallback OK for ${ticker}: ${parsedQs.quotes.length} quotes (source=${parsedQs.source}).`);
           return parsedQs;
         }
       }
-      console.warn(`[options] Yahoo fallback failed for ${ticker}: options request HTTP ${res.status} (likely 429 rate-limit or 401). Falling back to MOCK.`);
+      logger.warn(`[options] Yahoo fallback failed for ${ticker}: options request HTTP ${res.status} (likely 429 rate-limit or 401). Falling back to MOCK.`);
       return null;
     }
     const payload = (await res.json().catch(() => null)) as any;
     const parsed = parseYahooOptions(ticker, payload);
     if (!parsed) {
-      console.warn(`[options] Yahoo fallback returned an unparseable/empty payload for ${ticker} (check optionChain.result[0].options[].calls/puts). Falling back to MOCK.`);
+      logger.warn(`[options] Yahoo fallback returned an unparseable/empty payload for ${ticker} (check optionChain.result[0].options[].calls/puts). Falling back to MOCK.`);
       return null;
     }
-    console.log(`[options] Yahoo fallback OK for ${ticker}: ${parsed.quotes.length} quotes across ${parsed.expiries.length} expiry (source=${parsed.source}).`);
+    logger.info(`[options] Yahoo fallback OK for ${ticker}: ${parsed.quotes.length} quotes across ${parsed.expiries.length} expiry (source=${parsed.source}).`);
     return parsed;
   } catch (e) {
-    console.warn(`[options] Yahoo fallback errored for ${ticker}: ${e instanceof Error ? e.message : String(e)}. Falling back to MOCK.`);
+    logger.warn(`[options] Yahoo fallback errored for ${ticker}: ${e instanceof Error ? e.message : String(e)}. Falling back to MOCK.`);
     return null;
   }
 }
@@ -849,7 +850,7 @@ export async function fetchOptionChain(
     if (yahoo) return yahoo;
     // Yahoo was attempted but returned nothing — explain in the console + note so
     // the MOCK result is diagnosable rather than silent.
-    console.warn(`[options] ${sym}: returning MOCK chain (spot ${realSpot ? realSpot.toFixed(2) : 'band'} — no POLYGON_API_KEY set and Yahoo tokenless fetch returned no data). Set POLYGON_API_KEY for live, or check the [options] logs above for the Yahoo failure reason.`);
+    logger.warn(`[options] ${sym}: returning MOCK chain (spot ${realSpot ? realSpot.toFixed(2) : 'band'} — no POLYGON_API_KEY set and Yahoo tokenless fetch returned no data). Set POLYGON_API_KEY for live, or check the [options] logs above for the Yahoo failure reason.`);
     return {
       ticker: sym,
       underlying_price: mockBundle.underlying_price,
