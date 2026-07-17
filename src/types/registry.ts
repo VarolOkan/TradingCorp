@@ -36,7 +36,11 @@ export interface DataSourceSpec {
   // ---- §4.9 multi-source acquisition fields ----
   type?: 'rest' | 'graphql' | 'ws' | 'ingestion' | 'analyst';
   endpoint?: string;              // URL template (if rest/graphql)
-  auth?: 'none' | 'bearer' | 'apikey';   // auth attachment policy
+  auth?: 'none' | 'bearer' | 'apikey' | 'finnhub';   // auth attachment policy
+  //   'bearer'   → Authorization: Bearer <token>
+  //   'apikey'   → apikey=<token> query param
+  //   'finnhub'  → X-Finnhub-Token: <token> header (Finnhub's required scheme)
+  //   'none'     → no credential attached
   timeoutMs?: number;             // per-source timeout (default 5000)
   retries?: number;               // local retry count (default 2)
   required?: boolean;             // if true and fails → escalate to analyst-level failure
@@ -47,6 +51,15 @@ export interface DataSourceSpec {
    *  a nested envelope (e.g. Yahoo `{ chart: { result: [...] } }`) so the
    *  top-level field check in validatePayload doesn't false-negative. */
   okPath?: string;
+  /** Optional self-contained health probe appended to `endpoint` for the live
+   *  §4.9 acquisition + the [Test] button. When present, the engine calls this
+   *  URL (no {ticker} needed) instead of the templated `endpoint`, so the
+   *  source-status badge reflects the real probe. `__TOKEN__` is replaced with
+   *  the apikey for `auth: 'apikey'` sources. */
+  healthQuery?: string;
+  /** Field(s) expected in `healthQuery`'s response; used for payload validation
+   *  when the health probe is active (falls back to `fields` if absent). */
+  healthFields?: string[];
 }
 
 // ---- Declarative feature extraction ----

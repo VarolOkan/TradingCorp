@@ -33,7 +33,7 @@ import { registerApiDocsRoutes } from './api-docs-routes';
 import { registerNewsRoutes } from './news-routes';
 import { registerScreenerRoutes } from './screener-routes';
 import { buildThesisSummary } from './thesis-summary';
-import { isMockDisabled } from '../registry/logic/mockMode';
+import { shouldShowMockDisabledBanner } from '../registry/logic/mockMode';
 
 /**
  * Socket.IO server for real-time financial analysis updates
@@ -357,14 +357,28 @@ class AnalysisServer {
       // (decision/confidence/reasoning/...) is nested inside the last
       // governance system message's `data.overallDecision`. Normalize so the
       // front-ends get the flat fields they render.
+      const normalized = this.normalizeResult(result);
       socket.emit('analysis_complete', {
         ...result,
-        ...this.normalizeResult(result),
-        // Honest signal: when mock data is globally disabled and the run had no
-        // live sources, the output is empty (not fabricated). The UI shows a banner.
-        mockDisabled: isMockDisabled(),
+        ...normalized,
+        // Honest signal: only claim "no live source" when mock data is globally
+        // disabled AND the run genuinely acquired ZERO live sources. If any
+        // source came back ok/fallback (dataHealth.sourcesOk > 0), the outputs
+        // are real — suppress the banner (it was previously firing on the env
+        // flag alone, contradicting an all-OK Data Ingestion strip).
+        mockDisabled: shouldShowMockDisabledBanner(normalized.dataHealth),
         timestamp: new Date().toISOString()
       });
+
+      // Self-documenting diagnostic: prove at a glance whether the banner is
+      // correct or whether the running process is stale code. If sourcesOk>0
+      // yet mockDisabled=true, the server is NOT running the patched emit path.
+      logger.info(
+        `[mockDisabled gate] mockDisabled=${shouldShowMockDisabledBanner(normalized.dataHealth)} ` +
+          `sourcesOk=${normalized.dataHealth?.sourcesOk ?? 0} ` +
+          `sourcesTotal=${normalized.dataHealth?.sourcesTotal ?? 0} ` +
+          `tickers=${tickers.join(',')}`,
+      );
       
       logger.info(`Analysis completed for tickers: ${tickers.join(', ')}`);
     } catch (error) {

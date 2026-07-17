@@ -5,6 +5,7 @@
 import { Server, Socket } from 'socket.io';
 import { AgentState } from '../types/financial-analysis';
 import { buildLegacyGraph } from '../orchestration/financial-graph';
+import { shouldShowMockDisabledBanner } from '../registry/logic/mockMode';
 
 /**
  * Socket.IO server for real-time financial analysis updates
@@ -101,9 +102,10 @@ class AnalysisSocketServer {
       socket.emit('analysis_complete', {
         ...result,
         ...normalized,
-        // Honest signal: when mock data is globally disabled and the run had no
-        // live sources, the output is empty (not fabricated). The UI shows a banner.
-        mockDisabled: isMockDisabled(),
+        // Honest signal: only claim "no live source" when mock data is globally
+        // disabled AND zero live sources were acquired (dataHealth.sourcesOk===0).
+        // Any ok/fallback source means the outputs are real — suppress the banner.
+        mockDisabled: shouldShowMockDisabledBanner(normalized.dataHealth),
         timestamp: new Date().toISOString()
       });
       

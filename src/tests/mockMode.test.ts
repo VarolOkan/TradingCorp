@@ -12,7 +12,7 @@
 
 import { seededRandom } from '../registry/logic/shared';
 import { declarativeHandler } from '../registry/logic/declarative';
-import { isMockDisabled, setMockDisabled } from '../registry/logic/mockMode';
+import { isMockDisabled, setMockDisabled, shouldShowMockDisabledBanner } from '../registry/logic/mockMode';
 import { makeNodeSurface } from '../registry/logic/shared';
 import type { AgentState, AnalystTrace } from '../types/financial-analysis';
 import type { AnalystDef } from '../types/registry';
@@ -106,5 +106,31 @@ describe('mockMode gate', () => {
     // And the run produced a real verdict/score (not the empty/honest stub).
     expect(typeof trace.output.verdict).toBe('string');
     expect(trace.output.verdict!.length).toBeGreaterThan(0);
+  });
+});
+
+describe('shouldShowMockDisabledBanner (honest no-live-source gate)', () => {
+  afterEach(() => setMockDisabled(null));
+
+  it('mock ENABLED: never shows the banner regardless of dataHealth', () => {
+    setMockDisabled(false);
+    expect(shouldShowMockDisabledBanner(null)).toBe(false);
+    expect(shouldShowMockDisabledBanner({ sourcesOk: 0 })).toBe(false);
+    expect(shouldShowMockDisabledBanner({ sourcesOk: 3 })).toBe(false);
+  });
+
+  it('mock DISABLED + ZERO live sources: shows the banner (honest empty state)', () => {
+    setMockDisabled(true);
+    expect(shouldShowMockDisabledBanner(null)).toBe(true);
+    expect(shouldShowMockDisabledBanner(undefined)).toBe(true);
+    expect(shouldShowMockDisabledBanner({ sourcesOk: 0 })).toBe(true);
+  });
+
+  it('mock DISABLED + at least one healthy source: SUPPRESSES the banner (outputs are real)', () => {
+    // Reproduces the reported defect: Data Ingestion shows yahoo/alphaVantage/
+    // finnhub OK (sourcesOk >= 1) yet the banner falsely claimed "no live source".
+    setMockDisabled(true);
+    expect(shouldShowMockDisabledBanner({ sourcesOk: 1 })).toBe(false);
+    expect(shouldShowMockDisabledBanner({ sourcesOk: 3 })).toBe(false);
   });
 });

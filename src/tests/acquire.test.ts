@@ -266,6 +266,43 @@ describe('acquireForAnalyst — analyst-level flow', () => {
     expect(acc.degraded).toBe(true);
   });
 
+  it('registry credentialed sources report OK (not SKIPPED) when a valid token is stored', async () => {
+    // Mirrors the real registry defs: alphaVantage (apikey → apikey= query) +
+    // finnhub (finnhub → X-Finnhub-Token header), each with a self-contained
+    // healthQuery so the live §4.9 engine validates the SAME endpoint + auth
+    // the [Test] button probes (fixes the spurious SKIPPED badge AND the
+    // Finnhub 401 from the wrong Bearer header). The fetch double-checks the
+    // resolved auth matches what probeSource sends.
+    let avUrl = '';
+    let fhHeader = '';
+    const fetchFn: FetchFn = async (url, init) => {
+      if (url.includes('alphavantage.co')) {
+        avUrl = url;
+        // AlphaVantage GLOBAL_QUOTE envelope must carry the 'Global Quote' key.
+        return { status: 200, ok: true, json: async () => ({ 'Global Quote': { '01. symbol': 'IBM', '05. price': '150.00' } }), headers: { get: () => null } };
+      }
+      fhHeader = (init.headers as Record<string, string>)['X-Finnhub-Token'] ?? '';
+      // Finnhub /quote envelope must carry the quote keys.
+      return { status: 200, ok: true, json: async () => ({ c: 150, h: 151, l: 149, o: 148, pc: 147 }), headers: { get: () => null } };
+    };
+    const def = defWith([
+      restSource({ id: 'alphaVantage', auth: 'apikey', endpoint: 'https://www.alphavantage.co/query', fields: ['fundamental', 'technical'], healthQuery: '?function=GLOBAL_QUOTE&symbol=IBM&apikey=__TOKEN__', healthFields: ['Global Quote'], retries: 0 }),
+      restSource({ id: 'finnhub', auth: 'finnhub', endpoint: 'https://finnhub.io/api/v1', fields: ['sentiment', 'market'], healthQuery: '/quote?symbol=AAPL', healthFields: ['c', 'h', 'l', 'o', 'pc'], retries: 0 }),
+    ], { id: 'data_ingestion', onAllSourcesFailed: { action: 'useMock' } });
+    const acc = await acquireForAnalyst(def, {
+      fetchFn,
+      ticker: 'AAPL',
+      resolveToken: (sid) => (sid === 'alphaVantage' ? 'AVKEY' : sid === 'finnhub' ? 'FHKEY' : undefined),
+    });
+    expect(acc.sourceStatus.alphaVantage).toBe('ok');
+    expect(acc.sourceStatus.finnhub).toBe('ok');
+    // Auth must be attached the same way the [Test] probe does.
+    expect(avUrl).toContain('apikey=AVKEY');
+    expect(fhHeader).toBe('FHKEY');
+    expect(acc.degraded).toBe(false);
+    expect(acc.usedMockFallback).toBe(false);
+  });
+
   it('one of two fails (skip) → degraded', async () => {
     // yahoo ok, alpha 500-fails
     let call = 0;

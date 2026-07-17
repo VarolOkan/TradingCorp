@@ -71,6 +71,16 @@ const GraphState = Annotation.Root({
     reducer: (a: any[], b: any[]) => mergeDataReceived(a, b),
     default: () => [],
   }),
+  // §4.9 pipeline-wide data-health summary (sourcesOk/sourcesTotal/...). MUST be
+  // a declared channel or LangGraph silently drops it during state reduction —
+  // the ingestion node accumulates it, but the next node would receive the
+  // default (null) and the emitted result's dataHealth (hence the "no live
+  // source" banner) would be wrong. Single-writer-per-step: data_ingestion is
+  // stage-1 (runs BEFORE the stage-2 fan-out) and governance fans IN after, so
+  // no two nodes write it in the same super-step → last-value reducer is safe
+  // even in parallel mode (canRunParallel already disables parallel when any
+  // stage-2 analyst has live sources).
+  dataHealth: Annotation<any>({ reducer: (a: any, b: any) => b, default: () => null }),
 });
 
 export class AgencyGraph {

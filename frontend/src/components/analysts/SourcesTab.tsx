@@ -159,7 +159,7 @@ export const SourcesTab = forwardRef<SourcesTabHandle, SourcesTabProps>(function
           </h4>
           <label className="settings-field">
             <span>
-              {s.auth === 'bearer' ? 'Bearer token' : s.auth === 'apikey' ? 'API key' : 'Token'}
+              {s.auth === 'bearer' ? 'Bearer token' : s.auth === 'apikey' ? 'API key' : s.auth === 'finnhub' ? 'Finnhub token' : 'Token'}
               {isStored(s) && !clearTokens[s.sourceId] && (
                 <button
                   type="button"

@@ -23,7 +23,7 @@ export interface WeightField {
 export interface SourceCredField {
   sourceId: string;
   label: string;
-  auth: 'bearer' | 'apikey' | 'token';
+  auth: 'bearer' | 'apikey' | 'finnhub' | 'token';
   uriRequired: boolean;
   uriLabel: string;
   uriDefault: string;
@@ -131,7 +131,7 @@ export function buildAnalystConfigSchema(
     .map((s) => ({
       sourceId: s.id,
       label: s.label,
-      auth: (s.auth === 'bearer' || s.auth === 'apikey' ? s.auth : 'token') as SourceCredField['auth'],
+      auth: (s.auth === 'bearer' || s.auth === 'apikey' || s.auth === 'finnhub' ? s.auth : 'token') as SourceCredField['auth'],
       uriRequired: true,
       uriLabel: 'Base URI',
       // Pre-fill each known source's canonical endpoint (mirrors backend

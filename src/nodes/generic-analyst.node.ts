@@ -182,13 +182,28 @@ export class GenericAnalystNode {
       }
 
       // Accumulate pipeline-wide dataHealth.
-      const prior = updated.dataHealth ?? null;
-      const dataHealth = aggregateDataHealth(prior, acquisition, this.def.id);
+      // CRITICAL: handlers (declarative + fn) return a NEW state object that
+      // does NOT copy `state.dataHealth`, so by the time we get here `updated`
+      // may have dropped it. If we read prior from `updated` we'd reset the
+      // running count to 0 every node, and the LAST source-less node would emit
+      // dataHealth=undefined — making the "no live source" banner fire even on
+      // a green run. Fall back to the INPUT state's dataHealth so the count
+      // propagates across nodes regardless of handler behaviour.
+      const priorHealth = updated.dataHealth ?? state.dataHealth ?? null;
+      const dataHealth = aggregateDataHealth(priorHealth, acquisition, this.def.id);
 
       updated = {
         ...updated,
         analystTraces: traces,
         dataHealth,
+      };
+    } else if (state.dataHealth) {
+      // No acquisition on this node, but a prior node accumulated dataHealth that
+      // the handler may have dropped. Re-attach it so it still propagates to the
+      // final emitted state (otherwise the last source-less node wipes it).
+      updated = {
+        ...updated,
+        dataHealth: state.dataHealth,
       };
     }
 

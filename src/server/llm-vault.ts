@@ -219,9 +219,31 @@ export class TokenVault {
     this.data.users[this.userId] = { llm: {}, agencyModelRole: {}, sourceTokens: {} };
   }
 
-  /** Atomically write the encrypted vault (tmp file + rename). */
+  /** Atomically write the encrypted vault (tmp file + rename).
+   *
+   *  SAFETY (prevents silent token loss): the vault holds BOTH LLM tokens and
+   *  per-source data credentials (Alpha Vantage, Finnhub, ...) in ONE file.
+   *  Because the shared vault is a process-wide singleton, a successful boot
+   *  loads the COMPLETE file into `this.data`, so any save from either the LLM
+   *  path or the source-credential path already carries every other secret.
+   *  The one dangerous case is a process that has a cipher but could NOT decrypt
+   *  the existing file at boot: its `this.data` is empty, so overwriting would
+   *  wipe every persisted secret. Guard against exactly that — if
+   *  `vaultUnreadable` is set we REFUSE to write (the good bytes were preserved
+   *  as a .corrupt-*.bak by load()). We do NOT merge with the on-disk copy here:
+   *  a merge can only ever ADD keys, so it would resurrect intentionally
+   *  cleared entries (clearSourceToken / reset), breaking deletion semantics. */
   save(): void {
     if (!this.cipher) return; // disabled
+    // Guard: never clobber a file this process failed to read.
+    if (this.vaultUnreadable) {
+      console.warn(
+        `[vault] refusing to overwrite ${this.filePath} — existing file was unreadable ` +
+          `(vaultUnreadable set). A save here would drop all other persisted secrets. ` +
+          `Fix the passphrase / re-key, then retry.`,
+      );
+      return;
+    }
     const json = JSON.stringify(this.data);
     const enc = this.cipher.encrypt(json);
     const dir = path.dirname(this.filePath);

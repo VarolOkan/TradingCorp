@@ -171,7 +171,7 @@ export function buildAnalystConfigSchema(
       kind: 'source',
       sourceId: s.id,
       label: s.label,
-      auth: (s.auth === 'bearer' || s.auth === 'apikey' ? s.auth : 'token') as SourceCredField['auth'],
+      auth: (s.auth === 'bearer' || s.auth === 'apikey' || s.auth === 'finnhub' ? s.auth : 'token') as SourceCredField['auth'],
       uriRequired: true,
       uriLabel: 'Base URI',
       // Pre-fill each known source's canonical endpoint so the user only

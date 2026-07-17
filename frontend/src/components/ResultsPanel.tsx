@@ -135,7 +135,16 @@ export function ResultsPanel({ result, agencyId, onResultSaved }: ResultsPanelPr
 
       {result.mockDisabled && (
         <div className="mock-disabled-banner" role="alert" data-testid="mock-disabled-banner">
-          ⚠ Mock data disabled (DISABLE_MOCK_DATA). No live source is configured, so the
+          ⚠ Mock data disabled (DISABLE_MOCK_DATA).{' '}
+          {result.dataHealth && result.dataHealth.sourcesTotal > 0 ? (
+            <>
+              The run acquired <strong>{result.dataHealth.sourcesOk}/{result.dataHealth.sourcesTotal} sources healthy</strong>,
+              so this banner should be hidden — if you still see it, the server is running
+              stale code (rebuild/restart).{' '}
+            </>
+          ) : (
+            <>No live source is configured, so the </>
+          )}
           analyst outputs below are <strong>empty — not real and not fabricated</strong>.
           Configure a live data source (API key / endpoint) to produce genuine analysis.
         </div>

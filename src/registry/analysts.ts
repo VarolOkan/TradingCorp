@@ -88,6 +88,11 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
       // ignores and produced a spurious "Authentication failed — check the token".
       auth: 'apikey',
       fields: ['fundamental', 'technical'],
+      // Self-contained health probe so the §4.9 engine and the [Test] button
+      // exercise the SAME endpoint + auth (GLOBAL_QUOTE needs no {ticker} and is
+      // enough to confirm the key is valid). Mirrors the [Test] probeSource map.
+      healthQuery: '?function=GLOBAL_QUOTE&symbol=IBM&apikey=__TOKEN__',
+      healthFields: ['Global Quote'],
       label: 'Alpha Vantage',
       sources: ['Alpha Vantage'],
       timeoutMs: 8000,
@@ -98,8 +103,17 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
       id: 'finnhub',
       type: 'rest',
       endpoint: 'https://finnhub.io/api/v1',
-      auth: 'bearer',
+      // Finnhub authenticates via the `X-Finnhub-Token` header (or a
+      // `token=` query param) — NOT `Authorization: Bearer`. Declaring
+      // 'finnhub' makes both the runtime engine (buildHeaders) and the [Test]
+      // probe (probeSource) attach `X-Finnhub-Token`, which is what the
+      // provider actually accepts.
+      auth: 'finnhub',
       fields: ['sentiment', 'market'],
+      // Self-contained health probe: /quote?symbol=AAPL needs no {ticker} and is
+      // enough to confirm the bearer key is valid. Mirrors the [Test] probeSource map.
+      healthQuery: '/quote?symbol=AAPL',
+      healthFields: ['c', 'h', 'l', 'o', 'pc'],
       label: 'Finnhub',
       sources: ['Finnhub'],
       timeoutMs: 8000,

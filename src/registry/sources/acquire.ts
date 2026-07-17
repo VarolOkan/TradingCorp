@@ -89,6 +89,9 @@ function buildHeaders(source: DataSourceSpec, ctx: AcquireContext): Record<strin
     headers['Authorization'] = `Bearer ${token}`;
   } else if (source.auth === 'apikey' && token) {
     // apikey is attached as a query param on the URL (see expandUrl), not header.
+  } else if (source.auth === 'finnhub' && token) {
+    // Finnhub requires `X-Finnhub-Token` (Bearer is rejected with 401).
+    headers['X-Finnhub-Token'] = token;
   }
   return headers;
 }
@@ -109,8 +112,29 @@ function expandUrl(source: DataSourceSpec, ctx: AcquireContext): string {
   return `${base}${url}`;
 }
 
+/**
+ * Resolve the URL + validation fields for a single acquisition attempt.
+ * Sources that declare a self-contained `healthQuery` use it (no {ticker}
+ * needed) so the live §4.9 engine and the [Test] button exercise the SAME
+ * endpoint + auth — the source status badge then reflects the real probe
+ * result instead of a misleading SKIPPED from a mismatched {ticker} URL.
+ */
+function resolveAcquireTarget(source: DataSourceSpec, ctx: AcquireContext): { url: string; fields: string[] } {
+  const sourceId = source.id ?? source.label;
+  const token = ctx.resolveToken?.(sourceId) ?? ctx.runtimeConfig?.accessToken ?? '';
+  if (source.healthQuery) {
+    const root = (ctx.runtimeConfig?.baseUri && ctx.runtimeConfig.baseUri.trim()) || (source.endpoint ?? '');
+    const url =
+      source.auth === 'apikey' && token
+        ? `${root}${source.healthQuery.replace('__TOKEN__', encodeURIComponent(token))}`
+        : `${root}${source.healthQuery}`;
+    return { url, fields: source.healthFields ?? source.fields ?? [] };
+  }
+  return { url: expandUrl(source, ctx), fields: source.fields ?? [] };
+}
+
 /** Validate a successful payload actually carries the requested fields (case 4). */
-function validatePayload(payload: any, source: DataSourceSpec): boolean {
+function validatePayload(payload: any, source: DataSourceSpec, fields: string[] = source.fields): boolean {
   if (!payload || typeof payload !== 'object') return false;
   // If the source declares a nested okPath envelope (e.g. Yahoo
   // `{ chart: { result: [...] } }`), validate THAT node exists rather than
@@ -119,8 +143,10 @@ function validatePayload(payload: any, source: DataSourceSpec): boolean {
     return getPath(payload, source.okPath) !== undefined;
   }
   // An empty object for every requested field counts as schema-drift/empty.
-  const hasAny = source.fields.some((f) => payload[f] !== undefined && payload[f] !== null);
-  return hasAny || source.fields.length === 0;
+  // `fields` is the effective field set — when a healthQuery is active it is the
+  // probe's healthFields, so the live run validates the same shape the [Test] button does.
+  const hasAny = fields.some((f) => payload[f] !== undefined && payload[f] !== null);
+  return hasAny || fields.length === 0;
 }
 
 /** Read a dot/bracket path like `chart.result[0].meta` from an object. */
@@ -172,7 +198,8 @@ export async function acquireSource(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetchFn(expandUrl(source, ctx), {
+      const target = resolveAcquireTarget(source, ctx);
+      const res = await fetchFn(target.url, {
         method: 'GET',
         headers: buildHeaders(source, ctx),
         signal: controller.signal,
@@ -205,13 +232,13 @@ export async function acquireSource(
       }
 
       const payload = await res.json().catch(() => null);
-      if (!validatePayload(payload, source)) {
+      if (!validatePayload(payload, source, target.fields)) {
         // Case 4: empty / schema-drifted payload.
         return { id, ok: false, status: 'failed', reason: 'empty or schema-drifted payload' };
       }
       // Success — project only the requested fields.
       const data: Record<string, any> = {};
-      for (const f of source.fields) {
+      for (const f of target.fields) {
         if (payload[f] !== undefined) data[f] = payload[f];
       }
       return { id, ok: true, status: 'ok', data };

@@ -378,3 +378,71 @@ describe('getGraph flavor cache (server) — saved flavors must bypass the cache
     expect(resolved).toContain('options_risk');
   });
 });
+
+describe('dataHealth propagation across nodes (mock-disabled banner gate)', () => {
+  // Reproduces the bug: Data Ingestion (stage 1, live sources) accumulates
+  // dataHealth.sourcesOk, but downstream declarative/fn handlers RETURN a NEW
+  // state object that does NOT copy state.dataHealth. If the node read prior
+  // from that dropped value, every downstream node reset sourcesOk to 0, and
+  // the last source-less node wiped it — so the Results banner claimed "no
+  // live source" even on a fully-green run. The node must carry dataHealth
+  // forward regardless of handler behaviour.
+  it('preserves an upstream dataHealth (sourcesOk>0) through a source-less declarative node', async () => {
+    const declDef = Object.values(ANALYST_DEFS).find(
+      (d) => (d.logic?.mode ?? 'fn') === 'declarative',
+    )!;
+    const node = new GenericAnalystNode(declDef as any, {
+      horizon: 'MEDIUM_TERM',
+      instrument: 'OPTION',
+    });
+    const state = seedState();
+    state.dataHealth = {
+      sourcesOk: 3,
+      sourcesTotal: 3,
+      degradedAnalysts: [],
+      unavailableSources: [],
+      usedMockFallback: false,
+    };
+    const out = await node.process(state);
+    // The declarative handler drops dataHealth, but the node must re-attach it.
+    expect(out.dataHealth).toBeDefined();
+    expect(out.dataHealth!.sourcesOk).toBe(3);
+  });
+
+  it('a live-source node accumulates on top of an upstream dataHealth (does not reset)', async () => {
+    // Pick an analyst def that declares a live data source; require a token so
+    // acquisition runs and reports ok. We stub the store lookup via the real
+    // analystConfigStore + a token so acquireForAnalyst returns ok.
+    const srcDef = Object.values(ANALYST_DEFS).find(
+      (d) => Array.isArray((d as any).dataSources) && (d as any).dataSources.length > 0,
+    ) as any;
+    // Skip if no analyst in the registry carries live sources (parity safety).
+    if (!srcDef) return;
+    // Seed upstream dataHealth from an earlier ingestion node.
+    const upstream = seedState();
+    upstream.dataHealth = {
+      sourcesOk: 2,
+      sourcesTotal: 2,
+      degradedAnalysts: [],
+      unavailableSources: [],
+      usedMockFallback: false,
+    };
+    // Ensure a token exists so the source is not skipped.
+    const { analystConfigStore } = await import('../server/analyst-config');
+    const srcId = srcDef.dataSources[0].sourceId ?? srcDef.dataSources[0].id;
+    try {
+      analystConfigStore.set({ sessionId: 'default', sourceId: srcId, token: 'test-token-x' });
+    } catch {
+      /* store may reject unknown source; non-fatal for the propagation assertion */
+    }
+    const node = new GenericAnalystNode(srcDef as any, {
+      horizon: 'MEDIUM_TERM',
+      instrument: 'OPTION',
+    });
+    const out = await node.process(upstream);
+    // Whatever sources this node acquired, the total must be >= the upstream 2,
+    // never reset to 0.
+    expect(out.dataHealth).toBeDefined();
+    expect(out.dataHealth!.sourcesOk).toBeGreaterThanOrEqual(2);
+  });
+});

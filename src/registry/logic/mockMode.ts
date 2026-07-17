@@ -32,6 +32,22 @@ export function isMockDisabled(): boolean {
   return MOCK_DISABLED;
 }
 
+/**
+ * Honest "no live data" banner gate. The Results banner ("Mock data disabled…
+ * no live source is configured, outputs are empty") must ONLY show when mock is
+ * globally disabled AND the run genuinely acquired zero live sources. If any
+ * source came back ok/fallback (dataHealth.sourcesOk > 0) the outputs are real,
+ * so the banner would be a lie — it previously fired on the env flag alone and
+ * contradicted an all-OK Data Ingestion strip. Pass the run's dataHealth (or
+ * null/undefined when none was reported).
+ */
+export function shouldShowMockDisabledBanner(
+  dataHealth: { sourcesOk?: number } | null | undefined,
+): boolean {
+  if (!isMockDisabled()) return false;
+  return (dataHealth?.sourcesOk ?? 0) === 0;
+}
+
 // Touch config so the import is meaningful and the env is read through the
 // canonical config loader (dotenv already loaded by config.ts).
 void config;

@@ -93,9 +93,13 @@ export function registerAnalystConfigRoutes(
 
     const { analystId, sourceId } = req.body as { analystId: string; sourceId: string };
     const clearToken = Boolean((req.body as any)?.clearToken);
+    // Trim the token: API keys never contain whitespace, and paste from a
+    // terminal/managed-key UI frequently includes a trailing newline or spaces
+    // that silently causes "Authentication failed" at the provider.
+    const trimmedToken = validation.value.token.trim();
     store.set(
       { sessionId, analystId, sourceId },
-      { ...validation.value, clearToken },
+      { ...validation.value, token: trimmedToken, clearToken },
     );
 
     logger.info(
@@ -204,6 +208,9 @@ export async function probeSource(opts: {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (source.auth === 'bearer' && token) {
     headers['Authorization'] = `Bearer ${token}`;
+  } else if (source.auth === 'finnhub' && token) {
+    // Finnhub requires `X-Finnhub-Token` (Bearer is rejected with 401).
+    headers['X-Finnhub-Token'] = token;
   }
 
   // DIAGNOSTIC (temporary): log the resolved URL with the token redacted, the
@@ -211,7 +218,7 @@ export async function probeSource(opts: {
   const logUrl = url.replace(/apikey=[^&]+/i, 'apikey=***REDACTED***');
   console.log(
     `[probeSource] source=${source.id ?? source.label} auth=${source.auth} ` +
-    `url=${logUrl} willSendAuthHeader=${source.auth === 'bearer' && !!token}`,
+    `url=${logUrl} willSendHeader=${source.auth === 'finnhub' ? 'X-Finnhub-Token' : source.auth === 'bearer' ? 'Authorization' : 'none'}`,
   );
 
   const start = Date.now();
