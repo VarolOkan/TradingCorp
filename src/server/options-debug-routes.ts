@@ -28,6 +28,8 @@ export function registerOptionsDebugRoutes(app: Express): void {
     const effectiveKey = (vaultKey && vaultKey.trim()) || envKey || '';
     steps.push({ step: 'resolveKey', keySource, keyLength: effectiveKey.length, keyPresent: effectiveKey.length > 0 });
 
+    let providerMessage = '';
+
     if (!effectiveKey) {
       return res.status(200).json({
         symbol,
@@ -65,12 +67,17 @@ export function registerOptionsDebugRoutes(app: Express): void {
       } catch {
         parsedOk = false;
       }
+      try {
+        const j = JSON.parse(text);
+        if (j && typeof j.message === 'string') providerMessage = j.message;
+      } catch { /* non-JSON */ }
       steps.push({
         step: 'response',
         status,
         statusText,
         contentType: rawHeaders['content-type'] ?? rawHeaders['Content-Type'] ?? '',
         bodyStartsWith: text.slice(0, 80),
+        providerMessage,
         parsed: parsedOk,
         contractCount,
       });
@@ -94,10 +101,11 @@ export function registerOptionsDebugRoutes(app: Express): void {
       message: ok
         ? `LIVE: ${contractCount} contracts returned for ${symbol}. The Options tab should show LIVE.`
         : status !== 200
-          ? `Massive returned HTTP ${status} ${statusText}. Body: ${bodySnippet}`
+          ? `Massive returned HTTP ${status} ${statusText}.${providerMessage ? ` ${providerMessage}` : ''}`
           : parsedOk
             ? `Massive returned 200 but no usable option chain (0 contracts).`
             : `Massive returned a non-JSON / unexpected body. Body: ${bodySnippet}`,
+      providerMessage: providerMessage || undefined,
       bodySnippet,
       steps,
     });

@@ -796,8 +796,12 @@ export async function fetchOptionChain(
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
       const res = await doFetch(polygonSnapshotUrl(sym), apiKey ? headers : undefined);
+      // Read the raw body once so we can (a) parse the option chain and
+      // (b) extract Massive's verbatim error message on a non-ok response,
+      // without consuming the stream twice.
+      const rawText = await res.text().catch(() => '');
       if (res.ok) {
-        const payload = await res.json().catch(() => null);
+        const payload = (() => { try { return JSON.parse(rawText); } catch { return null; } })();
         const results = payload?.results?.results;
         if (Array.isArray(results) && results.length > 0) {
           const quotes: OptionQuote[] = [];
@@ -850,8 +854,17 @@ export async function fetchOptionChain(
         }
         // Reached here: live response was non-ok OR had no results. Record WHY
         // so a keyed-but-failing attempt is diagnosable instead of a silent mock.
-        logger.warn(`[options] ${sym}: live Polygon/Massive call returned ${res.status} (ok=${res.ok}) with no usable option chain. Falling back to MOCK.`);
-        lastLiveError = `live call returned HTTP ${res.status}`;
+        // Prefer Massive's verbatim message (e.g. "NOT_AUTHORIZED … upgrade your
+        // plan") so the UI tells the user the REAL reason, not just a status code.
+        let providerMsg = '';
+        try {
+          const b = JSON.parse(rawText);
+          if (b && typeof b.message === 'string') providerMsg = b.message;
+        } catch { /* non-JSON body */ }
+        logger.warn(`[options] ${sym}: live Polygon/Massive call returned ${res.status} (ok=${res.ok}) with no usable option chain${providerMsg ? ` — ${providerMsg}` : ''}. Falling back to MOCK.`);
+        lastLiveError = providerMsg
+          ? `live call returned HTTP ${res.status} (${providerMsg})`
+          : `live call returned HTTP ${res.status}`;
       } else {
         logger.warn(`[options] ${sym}: live Polygon/Massive call was not ok (status ${res.status}). Falling back to MOCK.`);
         lastLiveError = `live call returned HTTP ${res.status}`;

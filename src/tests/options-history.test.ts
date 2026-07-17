@@ -38,9 +38,21 @@ const polygonSnapshot = (over: any = {}) => ({
   },
 });
 
+// Response-like stub returning BOTH text (what fetchOptionChain now reads
+// first) and json, so the live parse path works regardless of which the
+// code consumes.
+function okRes(snapshot: any, status = 200) {
+  const body = JSON.stringify(snapshot);
+  return { ok: status >= 200 && status < 300, status, text: async () => body, json: async () => snapshot };
+}
+function errRes(status: number, body: any = {}) {
+  const t = JSON.stringify(body);
+  return { ok: false, status, text: async () => t, json: async () => body };
+}
+
 describe('fetchOptionChain (Phase I)', () => {
   it('maps a Polygon snapshot into OptionQuote[] with source polygon', async () => {
-    const fetchFn = async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() });
+    const fetchFn = async () => okRes(polygonSnapshot());
     const r = await fetchOptionChain('aapl', { apiKey: 'demo', fetchFn });
     expect(r.source).toBe('polygon');
     expect(r.ticker).toBe('AAPL');
@@ -61,13 +73,13 @@ describe('fetchOptionChain (Phase I)', () => {
   });
 
   it('falls back to mock when Polygon returns a non-ok status', async () => {
-    const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
+    const fetchFn = async () => errRes(429);
     const r = await fetchOptionChain('AAPL', { apiKey: 'demo', fetchFn });
     expect(r.source).toBe('mock');
   });
 
   it('falls back to mock when the payload has no results', async () => {
-    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ results: { results: [] } }) });
+    const fetchFn = async () => okRes({ results: { results: [] } });
     const r = await fetchOptionChain('AAPL', { apiKey: 'demo', fetchFn });
     expect(r.source).toBe('mock');
   });
@@ -75,13 +87,13 @@ describe('fetchOptionChain (Phase I)', () => {
 
 describe('GET /options-history route (Phase I)', () => {
   it('400 when symbol missing', async () => {
-    const app = makeApp(async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() }));
+    const app = makeApp(async () => okRes(polygonSnapshot()));
     const res = await request(app).get('/options-history');
     expect(res.status).toBe(400);
   });
 
   it('200 with live chain from Polygon', async () => {
-    const app = makeApp(async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() }));
+    const app = makeApp(async () => okRes(polygonSnapshot()));
     const res = await request(app).get('/options-history?symbol=AAPL');
     expect(res.status).toBe(200);
     expect(res.body.source).toBe('polygon');
@@ -118,7 +130,7 @@ describe('GET /options-history route (Phase I)', () => {
     g.fetch = async (url: string, headers?: Record<string, string>) => {
       seenUrls.push(String(url));
       if (headers?.Authorization) seenAuth.push(headers.Authorization);
-      return { ok: true, status: 200, json: async () => polygonSnapshot() };
+      return okRes(polygonSnapshot());
     };
     try {
       const app = express();
@@ -140,7 +152,7 @@ describe('GET /options-history route (Phase I)', () => {
 
 describe('GET /options-history greeks (Phase 17)', () => {
   it('returns a greeks row per quote with valid BS deltas for a live chain', async () => {
-    const app = makeApp(async () => ({ ok: true, status: 200, json: async () => polygonSnapshot() }));
+    const app = makeApp(async () => okRes(polygonSnapshot()));
     const res = await request(app).get('/options-history?symbol=AAPL');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.greeks)).toBe(true);
