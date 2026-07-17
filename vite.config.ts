@@ -51,6 +51,7 @@ export default defineConfig({
       '/analyst-flavors': { target: backendTarget, changeOrigin: true },
       '/analyst-params': { target: backendTarget, changeOrigin: true },
       '/analyst-config': { target: backendTarget, changeOrigin: true },
+      '/domain-sources': { target: backendTarget, changeOrigin: true },
       '/health': { target: backendTarget, changeOrigin: true },
       // Phase I: symbol → company name + basic market data.
       '/quote': { target: backendTarget, changeOrigin: true },

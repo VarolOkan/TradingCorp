@@ -28,6 +28,7 @@ import type { AnalystKind } from '../../../src/types/registry';
 import { getServerLog } from '../api/serverLogClient';
 import { getAnalystFlavors, postAnalystFlavors } from '../api/analystFlavorsClient';
 import { getAnalystSourceCatalog, type AnalystSourceCatalogAnalyst } from '../api/analystConfigClient';
+import { DomainSourcesTab, type DomainSourcesTabHandle } from './analysts/DomainSourcesTab';
 import { buildAnalystConfigSchema, type SourceCredField } from './analysts/analystConfigSchema';
 import { SourcesTab, type SourcesTabHandle } from './analysts/SourcesTab';
 
@@ -46,7 +47,7 @@ export interface SettingsDialogProps {
   onRegistryChange?: () => void;
 }
 
-type Tab = 'connection' | 'llm' | 'agencies' | 'analysts' | 'sources' | 'log';
+type Tab = 'connection' | 'llm' | 'agencies' | 'analysts' | 'sources' | 'domains' | 'log';
 
 const DEFAULTS: ConnectionSettings = {
   baseUri: 'http://localhost:3001',
@@ -120,6 +121,7 @@ export function SettingsDialog({
   const [sourceCatalogError, setSourceCatalogError] = useState<string | null>(null);
   const [vaultDisabled, setVaultDisabled] = useState(false);
   const sourcesRef = useRef<SourcesTabHandle>(null);
+  const domainSourcesRef = useRef<DomainSourcesTabHandle>(null);
   const diSources = useMemo(() => {
     if (!sourceCatalog) return [];
     const di = buildAnalystConfigSchema('data_ingestion', 'Data Ingestion', sourceCatalog.sources).sources;
@@ -823,6 +825,16 @@ export function SettingsDialog({
             onClick={() => setTab('sources')}
           >
             Sources
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'domains'}
+            className={tab === 'domains' ? 'settings-tab active' : 'settings-tab'}
+            data-testid="tab-domains"
+            onClick={() => setTab('domains')}
+          >
+            Data Sources
           </button>
           <button
             type="button"
@@ -1746,6 +1758,33 @@ export function SettingsDialog({
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {tab === 'domains' && (
+          <div className="domain-sources-tab-wrap">
+            <h2>Data Sources per Domain</h2>
+            <DomainSourcesTab
+              ref={domainSourcesRef}
+              sessionId={sessionId}
+              onSaved={() => { /* keep dialog open; changes apply next run */ }}
+            />
+            <div className="settings-actions">
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="domains-save"
+                disabled={saving}
+                onClick={async () => {
+                  const ok = await domainSourcesRef.current?.save();
+                  if (ok) onClose();
+                }}
+              >
+                Accept
+              </button>
+            </div>
           </div>
         )}
 

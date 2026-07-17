@@ -137,6 +137,7 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
     monogram: 'FA',
     prompt: prompter('fundamental'),
     dependsOn: ['data_ingestion'],
+    requiredDomains: ['fundamentals', 'price_bars', 'market_meta'],
     dataSources: [{
       from: 'data_ingestion',
       fields: ['balance_sheet', 'income_statement', 'cash_flow', 'key_ratios'],
@@ -170,6 +171,7 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
     monogram: 'TA',
     prompt: prompter('technical'),
     dependsOn: ['data_ingestion'],
+    requiredDomains: ['price_bars', 'market_meta'],
     dataSources: [{
       from: 'data_ingestion',
       fields: ['price', 'volume', 'indicators'],
@@ -201,6 +203,7 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
     monogram: 'SA',
     prompt: prompter('sentiment'),
     dependsOn: ['data_ingestion'],
+    requiredDomains: ['news_sentiment'],
     dataSources: [{
       from: 'data_ingestion',
       fields: ['news_sentiment', 'social_sentiment', 'analyst_sentiment'],
@@ -229,6 +232,7 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
     monogram: 'RA',
     prompt: prompter('risk'),
     dependsOn: ['fundamental', 'technical', 'sentiment'],
+    requiredDomains: ['price_bars', 'option_chain', 'risk_free_rate', 'market_meta'],
     dataSources: [
       { from: 'fundamental', fields: ['financial_health_score', 'red_flags'], label: 'Fundamental risk input', sources: ['(pipeline)'] },
       { from: 'technical', fields: ['technical_score', 'volatility', 'beta'], label: 'Technical risk input', sources: ['(pipeline)'] },

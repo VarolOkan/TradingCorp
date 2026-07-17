@@ -534,6 +534,48 @@ describe('MarketDataCard (Phase M)', () => {
     expect(screen.getByText('Sentiment Analyst read')).toBeInTheDocument();
     expect(screen.getByText('finnhub:live-news')).toBeInTheDocument();
   });
+
+  it('P2b-2: shows fused multi-source readout (both badges + low consensus + shares) when sentiment.consensus present', async () => {
+    const news = {
+      ticker: 'AAPL',
+      headlines: [{ title: 'AAPL beats', url: 'http://x/1', source: 'Bloomberg', timestamp: '2026-07-01T00:00:00Z', sentiment: 'POSITIVE', score: 25 }],
+      sentiment_score: 10,
+      sentiment_label: 'NEUTRAL',
+      source: 'mixed',
+    };
+    vi.spyOn(newsClient, 'getNews').mockResolvedValue(news as any);
+    const sentiment = {
+      news_sentiment: 'NEUTRAL',
+      social_sentiment: 'NEUTRAL',
+      analyst_sentiment: 'POSITIVE',
+      institutional_sentiment: 'POSITIVE',
+      sentiment_score: 10,
+      data_source: 'mixed:finnhub+yahoo',
+      consensus: {
+        agreement: 0.3,
+        low_consensus: true,
+        contributors: ['finnhub', 'yahoo'],
+        contributions: [
+          { sourceId: 'finnhub', value: 40, weight: 1, confidence: 1, effectiveWeight: 1, contribution: 0.6 },
+          { sourceId: 'yahoo', value: -20, weight: 1, confidence: 1, effectiveWeight: 1, contribution: 0.4 },
+        ],
+      },
+    };
+    render(<MarketDataCard symbol="AAPL" sentiment={sentiment} />);
+    fireEvent.click(screen.getByTestId('market-tab-news'));
+    await waitFor(() => expect(screen.getByTestId('fusion-consensus')).toBeInTheDocument());
+    // Both source badges render.
+    expect(screen.getByText('finnhub')).toBeInTheDocument();
+    expect(screen.getByText('yahoo')).toBeInTheDocument();
+    // Low consensus flag surfaces.
+    expect(screen.getByTestId('fusion-low-consensus')).toBeInTheDocument();
+    // Per-source contribution shares surface.
+    expect(screen.getByText(/finnhub 60%/)).toBeInTheDocument();
+    expect(screen.getByText(/yahoo 40%/)).toBeInTheDocument();
+    // The legacy single-source string is NOT shown when consensus is present.
+    expect(screen.queryByText('mixed:finnhub+yahoo')).not.toBeInTheDocument();
+  });
+
 });
 
 describe('MarketDataCard — watch star (Phase 7)', () => {

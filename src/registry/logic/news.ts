@@ -12,6 +12,8 @@
 //   Finnhub /company-news (key) -> Yahoo Finance news feed -> Google News RSS
 //   -> synthetic seeded headlines (last resort, no network).
 
+import { finnhubNewsAdapter } from '../sources/adapters/finnhub-news';
+
 export interface NewsHeadline {
   title: string;
   url: string;
@@ -29,6 +31,24 @@ export interface NewsHeadline {
   sourceRoot?: 'yahoo' | 'google';
 }
 
+export interface SentimentConsensus {
+  /** 0..1 agreement across sources (1 = identical, →0 = maximally divergent). */
+  agreement: number;
+  /** true when >1 source contributed AND agreement < threshold. */
+  low_consensus: boolean;
+  /** source ids that actually contributed to the blend. */
+  contributors: string[];
+  /** per-source breakdown for the trace drawer. */
+  contributions: Array<{
+    sourceId: string;
+    value: number;
+    weight: number;
+    confidence: number;
+    effectiveWeight: number;
+    contribution: number;
+  }>;
+}
+
 export interface NewsResult {
   ticker: string;
   headlines: NewsHeadline[];
@@ -38,6 +58,8 @@ export interface NewsResult {
   sentiment_label: string;
   source: 'finnhub' | 'yahoo' | 'google' | 'mixed' | 'mock';
   note?: string;
+  /** P2b: populated when ≥2 sources were weighed into this result (source:'mixed'). */
+  consensus?: SentimentConsensus;
 }
 
 export type NewsFetchFn = (url: string) => Promise<{ ok: boolean; json: () => Promise<any>; text?: () => Promise<string>; status?: number }>;
@@ -289,36 +311,12 @@ export async function fetchCompanyNews(
       const res = await doFetch(finnhubUrl(ticker, key));
       if (res.ok) {
         const payload = await res.json().catch(() => null);
-        const items: any[] = Array.isArray(payload) ? payload : [];
-        const headlines: NewsHeadline[] = items
-          .filter((it) => it && typeof it.headline === 'string')
-          .map((it) => {
-            const score = scoreHeadline(it.headline);
-            return {
-              title: it.headline,
-              url: typeof it.url === 'string' ? it.url : '',
-              source: typeof it.source === 'string' ? it.source : 'Finnhub',
-              timestamp: typeof it.datetime === 'number'
-                ? new Date(it.datetime * 1000).toISOString()
-                : new Date().toISOString(),
-              sentiment: scoreToLabel(score),
-              score,
-              summary: typeof it.summary === 'string' ? it.summary : undefined,
-            };
-          })
-          .sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp))
-          .slice(0, 30);
-        const agg = headlines.length
-          ? Math.round(headlines.reduce((s, h) => s + h.score, 0) / headlines.length)
-          : 0;
-        await enrichSummaries(headlines, doFetch);
-        return {
-          ticker,
-          headlines,
-          sentiment_score: agg,
-          sentiment_label: scoreToLabel(agg),
-          source: 'finnhub',
-        };
+        // P1: parse delegated to the Finnhub news adapter (pure, fixture-tested).
+        const parsed = finnhubNewsAdapter.normalize(payload, { ticker });
+        if (parsed) {
+          await enrichSummaries(parsed.headlines, doFetch);
+          return parsed;
+        }
       }
     } catch {
       /* fall through to Yahoo */

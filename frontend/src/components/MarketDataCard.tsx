@@ -709,7 +709,26 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
                         <div className="quote-stat"><span className="quote-stat-label">Analyst</span><span className="quote-stat-value">{sa.analyst_sentiment}</span></div>
                         <div className="quote-stat"><span className="quote-stat-label">Institutional</span><span className="quote-stat-value">{sa.institutional_sentiment}</span></div>
                         <div className="quote-stat"><span className="quote-stat-label">Score</span><span className="quote-stat-value">{sa.sentiment_score}</span></div>
-                        {sa.data_source && <div className="quote-stat"><span className="quote-stat-label">Source</span><span className="quote-stat-value">{sa.data_source}</span></div>}
+                        {sa.consensus ? (
+                          <div className="quote-stat quote-stat-wide" data-testid="fusion-consensus">
+                            <span className="quote-stat-label">Sources fused</span>
+                            <span className="quote-stat-value">
+                              {sa.consensus.contributors.map((c: string) => (
+                                <span key={c} className={`fusion-badge fusion-badge-${c}`}>{c}</span>
+                              ))}
+                              {sa.consensus.low_consensus && (
+                                <span className="fusion-low-consensus" data-testid="fusion-low-consensus">⚠ low consensus</span>
+                              )}
+                            </span>
+                            <span className="quote-stat-sub">
+                              {sa.consensus.contributions
+                                .map((ct: any) => `${ct.sourceId} ${Math.round(ct.contribution * 100)}%`)
+                                .join(' · ')}
+                            </span>
+                          </div>
+                        ) : sa.data_source ? (
+                          <div className="quote-stat"><span className="quote-stat-label">Source</span><span className="quote-stat-value">{sa.data_source}</span></div>
+                        ) : null}
                       </div>
                     </div>
                   )}

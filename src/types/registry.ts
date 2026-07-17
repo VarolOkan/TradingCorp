@@ -181,6 +181,13 @@ export interface AnalystDef {
   dependsOn?: string[];
   /** External data sources this analyst reaches out to (§4.9). */
   dataSources?: DataSourceSpec[];
+  /**
+   * Typed DATA-DOMAIN contract this analyst requires (vendor-agnostic).
+   * Drives `resolveDomain` routing (see src/registry/logic/domains.ts and
+   * docs/MULTI_SOURCE_ARCHITECTURE.md). Declaring domains — not providers —
+   * is what lets sources be swapped/added without touching the handler.
+   */
+  requiredDomains?: import('../registry/types/domains').DataDomain[];
   /** Declarative feature extraction specs. */
   features?: FeatureSpec[];
   /** Logic definition (declarative score+verdict or fn key). */

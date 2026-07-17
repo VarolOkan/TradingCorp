@@ -32,6 +32,28 @@ export const DEFAULT_SOURCE_URIS: Record<string, string> = {
 };
 
 /**
+ * P3 — default per-domain ordered source list. This is the SWAPPABLE mapping
+ * that lets a source be enabled / disabled / reordered per domain from config
+ * (Settings UI, P3b) with NO code change. The first id in each list is the
+ * preferred primary; resolveDomain walks the list, acquiring each enabled
+ * source and collecting live records (fan-in). Disabling the last source for a
+ * domain degrades THAT domain (honest `skipped` note) — not the whole pipeline.
+ *
+ * These ids are the canonical `DataSourceSpec.id`s the acquisition engine knows
+ * about. `news_sentiment` already has >1 genuinely-live source (finnhub + the
+ * keyless yahoo/google chain); the others are single-source today and become
+ * multi-source in later phases (P4/P6) by appending ids here.
+ */
+export const DOMAIN_SOURCES: Record<string, string[]> = {
+  price_bars: ['yahoo'],
+  option_chain: ['polygon'],
+  news_sentiment: ['finnhub', 'yahoo', 'google'],
+  fundamentals: ['alphaVantage'],
+  risk_free_rate: ['treasuryRfr'],
+  market_meta: ['yahoo'],
+};
+
+/**
  * Analyst id union. Mirrors frontend/src/components/analysts/analysts.ts
  * `AnalystId` but is declared here to keep the backend module free of a
  * frontend path import (separate tsconfig / vitest scope).

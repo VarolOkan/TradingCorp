@@ -266,6 +266,7 @@ installed) or run `graphify install`.
 - `docs/EXTENDING_ANALYSTS.md` — add an analyst/agency.
 - `docs/SCREENER_STANDARDS.md` — Screener selection standards.
 - `docs/SETUP.md` — install/run/config.
+- `docs/MULTI_SOURCE_ARCHITECTURE.md` — vendor-agnostic multi-source plan (data domains + adapters + fan-in/weighting; phased rework NOT yet scheduled).
 - `docs/archive/` — superseded design docs (historical only).
 - `docs/openapi.json` — REST API spec (served live at `/api-docs`).
 

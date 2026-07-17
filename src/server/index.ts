@@ -16,6 +16,8 @@ import { connectionConfigStore, ConnectionConfigStore } from './connection-confi
 import { registerConfigRoutes } from './config-routes';
 import { analystConfigStore, AnalystConfigStore } from './analyst-config';
 import { registerAnalystConfigRoutes } from './analyst-config-routes';
+import { domainSourceConfigStore } from './domain-source-config';
+import { registerDomainSourceRoutes } from './domain-source-routes';
 import { analystParamsStore } from './analyst-params';
 import { registerAnalystParamsRoutes } from './analyst-params-routes';
 import { analystFlavorStore } from './analyst-flavors';
@@ -221,6 +223,9 @@ class AnalysisServer {
     // Per-analyst / per-source credentials (B1). The Settings dialog POSTs a
     // distinct token per analyst source here; stored server-side, never echoed.
     registerAnalystConfigRoutes(this.app, analystConfigStore);
+    // P3b — swappable per-domain source mapping (set from the Settings UI; the
+    // engine reads it via resolveDomain -> DomainSourceConfigStore).
+    registerDomainSourceRoutes(this.app, domainSourceConfigStore);
 
     // Per-analyst tunable WEIGHTS (per-card Settings panel). Saved weight
     // overrides are merged into the agency graph at request time; stored

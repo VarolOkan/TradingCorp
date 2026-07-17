@@ -7,8 +7,10 @@
 import type { AgentState } from '../../types/financial-analysis';
 import type { PriceBarSeries, BarInterval } from '../../types/financial-analysis';
 import { stringToSeed, seededRandom, annotateDataReceived, recordDataReceived, type NodeSurface } from './shared';
-import { fetchPriceBars } from './hist';
 import { fetchCompanyNews, newsToIngestedSentiment } from './news';
+import { fuseSentiment } from './fuse';
+import { resolveDomain } from './domains';
+import { alphaVantageFundamentalsAdapter } from '../sources/adapters/alphavantage-fundamentals';
 import type { AnalystTuning } from '../../types/registry';
 
 export type { NodeSurface };
@@ -68,11 +70,11 @@ export async function fetchEquityBars(
   const series: PriceBarSeries[] = [];
   let anyLive = false;
   for (const interval of profile.intervals) {
-    const res = await fetchPriceBars(ticker, {
-      interval,
-      lookbackDays: profile.lookbackDays,
-      ...(fetchFn ? { fetchFn } : {}),
+    const [rec] = await resolveDomain('price_bars', ticker, {
+      ...(fetchFn ? { fetchFn: fetchFn as any } : {}),
+      profile: { intervals: [interval as '1d' | '5m' | '1m'], lookbackDays: profile.lookbackDays },
     });
+    const res = rec!.data;
     series.push({ interval: res.interval, lookback_days: res.lookback_days, bars: res.bars });
     if (res.source === 'yahoo') anyLive = true;
   }
@@ -133,11 +135,24 @@ export async function dataIngestionHandler(
       const fetchFn = (url: string, init: any) => (globalThis as any).fetch(url, init);
       for (const ticker of state.tickers) {
         try {
-          const news = await fetchCompanyNews(ticker, { finnhubKey, fetchFn: fetchFn as any });
-          if (news.source === 'finnhub' && news.headlines.length > 0) {
-            sentimentData[ticker] = { ...sentimentData[ticker], ...newsToIngestedSentiment(news) };
-            liveSentimentSources.push('Finnhub (live news)');
+          // P2b: resolveDomain returns the primary finnhub record + (best-effort)
+          // a keyless secondary (yahoo/google). Fuse them when >1 live source;
+          // otherwise fall back to the unchanged single-source behaviour.
+          const recs = await resolveDomain('news_sentiment', ticker, { finnhubKey, fetchFn: fetchFn as any });
+          const liveRecs = recs.filter((r) => r.data && r.data.headlines.length > 0 && r.sourceId !== 'mock');
+          let news = liveRecs[0]?.data;
+          if (!news && recs[0]?.data) news = recs[0].data; // all-mock: keep seeded shape
+          if (!news || news.headlines.length === 0) continue;
+          // Fuse when multiple live sources present (genuine fan-in).
+          const fused = liveRecs.length > 1 ? fuseSentiment(liveRecs) : null;
+          const chosen = fused ? fused.blended : news;
+          const ingest = newsToIngestedSentiment(chosen);
+          if (fused) {
+            ingest.data_source = `mixed:${fused.fusion.contributors.join('+')}`;
+            (ingest as any).consensus = fused.blended.consensus;
           }
+          sentimentData[ticker] = { ...sentimentData[ticker], ...ingest };
+          for (const r of liveRecs) liveSentimentSources.push(`${r.sourceId} (live news)`);
         } catch {
           /* keep seeded sentiment for this ticker on fetch failure */
         }
@@ -382,19 +397,7 @@ function rsi(closes: number[], period = 14): number | null {
 }
 
 /** Map an Alpha Vantage OVERVIEW payload onto a FundamentalAnalyzer health
- *  score (0-100), reusing the same banding as scoreFromRatios. */
-function scoreFromAvOverview(j: any): number {
-  const de = num(j.DebtEquityRatio) ?? 0.5;
-  const cr = num(j.CurrentRatio) ?? 1.2;
-  const roe = (num(j.ReturnOnEquityTTM) ?? 0) / 100;
-  const pm = (num(j.ProfitMargin) ?? 0) / 100;
-  let score = 60;
-  score += de < 0.5 ? 8 : -8;
-  score += cr > 1.5 ? 6 : cr < 1 ? -6 : 0;
-  score += roe > 0.15 ? 10 : roe < 0.05 ? -6 : 0;
-  score += pm > 0.2 ? 8 : pm < 0.05 ? -6 : 0;
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
+ *  score (0-100). Re-exported from the AV adapter (single source of truth). */
 
 export async function fetchRealFinancialData(
   input: any,
@@ -436,27 +439,8 @@ export async function fetchRealFinancialData(
         const res = await doFetch(url);
         if (res.ok) {
           const j = await res.json().catch(() => ({} as any));
-          if (j && j.Symbol && j.DebtEquityRatio !== undefined) {
-            const fcfYield = (() => {
-              const ocf = num(j.OperatingCashflow);
-              const mcap = num(j.MarketCapitalization);
-              return ocf !== null && mcap && mcap > 0 ? ocf / mcap : null;
-            })();
-            liveFundamentals = {
-              fundamental_source: 'alphaVantage:OVERVIEW',
-              financial_health_score: num(j.ProfitMargin) !== null && num(j.ReturnOnEquityTTM) !== null
-                ? scoreFromAvOverview(j)
-                : undefined,
-              key_ratios: {
-                debt_to_equity: num(j.DebtEquityRatio) ?? 0,
-                current_ratio: num(j.CurrentRatio) ?? 0,
-                roe: (num(j.ReturnOnEquityTTM) ?? 0) / 100,
-                roa: (num(j.ReturnOnAssetsTTM) ?? 0) / 100,
-                profit_margin: (num(j.ProfitMargin) ?? 0) / 100,
-                free_cash_flow_yield: fcfYield !== null ? fcfYield : 0,
-              },
-            };
-          }
+          // P1: parse delegated to the Alpha Vantage fundamentals adapter.
+          liveFundamentals = alphaVantageFundamentalsAdapter.normalize(j, { ticker });
         }
       } catch {
         /* fall through to seeded fundamental */

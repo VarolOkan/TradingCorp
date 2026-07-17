@@ -29,6 +29,8 @@ import type {
 } from '../../types/financial-analysis';
 import { stringToSeed, seededRandom } from './shared';
 import { bsPrice, bsGreeks, yearsToExpiry, resolveRfr, DEFAULT_RFR } from './greeks';
+import { resolveDomain } from './domains';
+import { yahooPriceAdapter } from '../sources/adapters/yahoo-price';
 import { logger } from '../../utils/logger';
 
 /**
@@ -383,12 +385,6 @@ const YAHOO_CHART = (symbol: string, range: string, interval: string) =>
     symbol,
   ).toUpperCase()}?range=${range}&interval=${interval}`;
 
-function toNum(v: any): number | null {
-  if (v === undefined || v === null) return null;
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 export interface PriceBarsResult {
   ticker: string;
   interval: BarInterval;
@@ -412,35 +408,13 @@ export async function fetchPriceBars(
       const res = await doFetch(YAHOO_CHART(sym, yahooRange(lookbackDays), interval));
       if (res.ok) {
         const payload = await res.json().catch(() => null);
-        const result = payload?.chart?.result?.[0];
-        const ts: number[] = result?.timestamp ?? [];
-        const q = result?.indicators?.quote?.[0] ?? {};
-        if (ts.length > 0 && Array.isArray(q.open)) {
-          const bars: PriceBar[] = [];
-          for (let i = 0; i < ts.length; i++) {
-            const open = toNum(q.open[i]);
-            const close = toNum(q.close[i]);
-            if (open === null || close === null) continue; // skip null pads
-            bars.push({
-              t: new Date(ts[i] * 1000).toISOString(),
-              open,
-              high: toNum(q.high?.[i]) ?? open,
-              low: toNum(q.low?.[i]) ?? open,
-              close,
-              volume: toNum(q.volume?.[i]) ?? 0,
-              ...(interval === '1d' ? {} : { vwap: toNum(q.vwap?.[i]) ?? undefined }),
-            });
-          }
-          if (bars.length > 0) {
-            return {
-              ticker: sym,
-              interval,
-              lookback_days: lookbackDays,
-              bars,
-              source: 'yahoo',
-            };
-          }
-        }
+        // P1: parse delegated to the Yahoo price adapter (pure, fixture-tested).
+        const parsed = yahooPriceAdapter.normalize(payload, {
+          ticker: sym,
+          interval,
+          lookbackDays,
+        });
+        if (parsed) return parsed;
       }
     } catch {
       /* fall through to mock */
@@ -1140,18 +1114,22 @@ export async function resolveLiveOptionsBundle(
   const rfr = base.rfr;
 
   // Live price bars (Yahoo, tokenless).
-  const priceRes = await fetchPriceBars(ticker, {
-    interval: profile.intervals?.[0] === '5m' || profile.intervals?.[0] === '1m' ? (profile.intervals[0] as '5m' | '1m') : '1d',
-    lookbackDays: profile.lookbackDays ?? 90,
-    ...(opts.fetchFn ? { fetchFn: opts.fetchFn as any } : {}),
+  const [priceRec] = await resolveDomain('price_bars', ticker, {
+    fetchFn: opts.fetchFn as any,
+    profile: {
+      intervals: [profile.intervals?.[0] === '5m' || profile.intervals?.[0] === '1m' ? (profile.intervals[0] as '5m' | '1m') : '1d'],
+      lookbackDays: profile.lookbackDays ?? 90,
+    },
   });
+  const priceRes = priceRec!.data;
   const priceMock = priceRes.source === 'mock';
 
   // Live option chain (Polygon, keyed).
-  const chainRes = await fetchOptionChain(ticker, {
+  const [chainRec] = await resolveDomain('option_chain', ticker, {
+    fetchFn: opts.fetchFn as any,
     ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
-    ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
   });
+  const chainRes = chainRec!.data;
   const chainMock = chainRes.source === 'mock';
 
   // Real-bid/ask fallback: if the keyed Polygon path wasn't entitled (or no
