@@ -193,6 +193,13 @@ export interface AnalystSourceConfig {
   token: string;
   /** Free-form extra knobs for the source. */
   extra: Record<string, string>;
+  /**
+   * When true, an empty `token` is an explicit CLEAR (wipe the stored token).
+   * When false/omitted, an empty `token` means "keep the existing token"
+   * (the UI only ever shows a placeholder, never the real value, so a re-save
+   * must not clobber a previously stored token).
+   */
+  clearToken?: boolean;
 }
 
 /** Catalog entry returned by GET /analyst-config: one credentialed source. */
@@ -200,6 +207,8 @@ export interface AnalystSourceCatalogEntry {
   id: string;
   label: string;
   auth: string;
+  /** True if a token/URI has been stored for this source (never the secret). */
+  hasToken: boolean;
 }
 
 /** One analyst that declares credentialed (live + auth) sources. */
@@ -212,4 +221,7 @@ export interface AnalystSourceCatalogAnalyst {
 /** Response from GET /analyst-config. */
 export interface AnalystSourceCatalog {
   analysts: AnalystSourceCatalogAnalyst[];
+  /** True when the server vault is disabled (no LLM_VAULT_PASSPHRASE) — stored
+   *  credentials are in-memory only and will NOT survive a restart. */
+  vaultDisabled?: boolean;
 }

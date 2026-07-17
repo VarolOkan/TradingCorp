@@ -69,6 +69,48 @@ describe('TokenVault (AES fallback cipher)', () => {
   });
 });
 
+describe('TokenVault — per-source credentials (Phase: source token GPG persistence)', () => {
+  const file = tmpFile('source');
+  afterEach(() => { try { fs.unlinkSync(file); } catch {} });
+
+  it('persists a source token + extra URI and reads it back after a fresh instance', () => {
+    const v1 = aesVault(file);
+    v1.setSourceToken('data_ingestion', 'alphaVantage', 'av-key-123', { uri: 'https://www.alphavantage.co/query' });
+    v1.save();
+    expect(fs.existsSync(file)).toBe(true);
+
+    const v2 = aesVault(file);
+    const got = v2.getSourceToken('data_ingestion', 'alphaVantage');
+    expect(got?.token).toBe('av-key-123');
+    expect(got?.extra.uri).toBe('https://www.alphavantage.co/query');
+  });
+
+  it('keeps source tokens isolated from LLM tokens in the same file', () => {
+    const v = aesVault(file);
+    v.setLlm('scanner', { role: 'scanner', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', token: 'llm-tok' });
+    v.setSourceToken('data_ingestion', 'finnhub', 'fh-key', { uri: 'https://finnhub.io/api/v1' });
+    v.save();
+
+    const v2 = aesVault(file);
+    expect(v2.getLlm('scanner')?.token).toBe('llm-tok');
+    expect(v2.getSourceToken('data_ingestion', 'finnhub')?.token).toBe('fh-key');
+    // unrelated source untouched
+    expect(v2.getSourceToken('data_ingestion', 'alphaVantage')).toBeUndefined();
+  });
+
+  it('clearSourceToken removes only that source', () => {
+    const v = aesVault(file);
+    v.setSourceToken('data_ingestion', 'alphaVantage', 'av', { uri: 'u' });
+    v.setSourceToken('data_ingestion', 'finnhub', 'fh', { uri: 'u2' });
+    v.save();
+    v.clearSourceToken('data_ingestion', 'alphaVantage');
+    v.save();
+    const v2 = aesVault(file);
+    expect(v2.getSourceToken('data_ingestion', 'alphaVantage')).toBeUndefined();
+    expect(v2.getSourceToken('data_ingestion', 'finnhub')?.token).toBe('fh');
+  });
+});
+
 describe('LlmConfigStore + vault integration', () => {
   const file = tmpFile('store');
   afterEach(() => { try { fs.unlinkSync(file); } catch {} });

@@ -47,7 +47,7 @@ describe('analyst-config-schema (Phase 1)', () => {
     expect(schema.weights.find((w) => w.key === 'baseAllocation')!.default).toBe(2);
   });
 
-  it('adds a source credential field when a catalog source is supplied', () => {
+  it('adds a source credential field with a pre-filled Base URI (user confirms, no typing)', () => {
     const schema = buildAnalystConfigSchema(defFor('fundamental'), [
       { id: 'alphaVantage', label: 'Alpha Vantage', auth: 'apikey' },
     ]);
@@ -59,6 +59,16 @@ describe('analyst-config-schema (Phase 1)', () => {
       uriRequired: true,
       uriLabel: 'Base URI',
     });
+    // Pre-filled canonical endpoint so the user only confirms.
+    expect(schema.sources[0].uriDefault).toBe('https://www.alphavantage.co/query');
+  });
+
+  it('pre-fills the Finnhub Base URI too', () => {
+    const schema = buildAnalystConfigSchema(defFor('data_ingestion'), [
+      { id: 'finnhub', label: 'Finnhub', auth: 'bearer' },
+    ]);
+    expect(schema.sources[0].sourceId).toBe('finnhub');
+    expect(schema.sources[0].uriDefault).toBe('https://finnhub.io/api/v1');
   });
 
   it('hasConfig is false when an analyst has nothing adjustable (no weights, no sources)', () => {

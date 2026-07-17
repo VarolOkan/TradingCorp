@@ -34,9 +34,18 @@ import type { LlmModelConfig, LlmRole } from './llm-config';
 
 const VAULT_VERSION = 1;
 
+export interface SourceTokenDTO {
+  token: string;
+  extra: Record<string, string>;
+}
+
 export interface UserVault {
   llm: Partial<Record<LlmRole, LlmModelConfig>>;
   agencyModelRole: Record<string, LlmRole | null>;
+  /** Per-source data credentials (Alpha Vantage, Finnhub, ...). Keyed by
+   *  `${analystId}:${sourceId}` — single-tenant today (one server). Secrets
+   *  ONLY; never echoed to the client. Persisted encrypted, survives restart. */
+  sourceTokens: Record<string, SourceTokenDTO>;
 }
 
 export interface VaultData {
@@ -165,10 +174,23 @@ export class TokenVault {
   private user(): UserVault {
     let u = this.data.users[this.userId];
     if (!u) {
-      u = { llm: {}, agencyModelRole: {} };
+      u = { llm: {}, agencyModelRole: {}, sourceTokens: {} };
       this.data.users[this.userId] = u;
     }
+    if (!u.sourceTokens) u.sourceTokens = {};
     return u;
+  }
+
+  getSourceToken(analystId: string, sourceId: string): SourceTokenDTO | undefined {
+    return this.user().sourceTokens[`${analystId}:${sourceId}`];
+  }
+
+  setSourceToken(analystId: string, sourceId: string, token: string, extra: Record<string, string>): void {
+    this.user().sourceTokens[`${analystId}:${sourceId}`] = { token, extra: extra ?? {} };
+  }
+
+  clearSourceToken(analystId: string, sourceId: string): void {
+    delete this.user().sourceTokens[`${analystId}:${sourceId}`];
   }
 
   getLlm(role: LlmRole): LlmModelConfig | undefined {
@@ -194,7 +216,7 @@ export class TokenVault {
 
   /** Remove all secret data for the current user (used by store.reset()). */
   clearUser(): void {
-    this.data.users[this.userId] = { llm: {}, agencyModelRole: {} };
+    this.data.users[this.userId] = { llm: {}, agencyModelRole: {}, sourceTokens: {} };
   }
 
   /** Atomically write the encrypted vault (tmp file + rename). */
@@ -240,4 +262,15 @@ export function createVault(): TokenVault {
     console.error(`[vault] UNREADABLE: ${vault.vaultUnreadable}`);
   }
   return vault;
+}
+
+/**
+ * Process-wide SINGLE vault instance. Both the LLM config store and the
+ * per-source credential store (analyst-config) must use THIS instance so a save
+ * from either one never overwrites the other's in-memory copy of the file.
+ */
+let _sharedVault: TokenVault | null = null;
+export function getSharedVault(): TokenVault {
+  if (!_sharedVault) _sharedVault = createVault();
+  return _sharedVault;
 }

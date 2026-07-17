@@ -12,10 +12,10 @@
 // POSTed to /analyst-config (URI carried in `extra.uri`). Nothing is echoed
 // back or stored in the client bundle beyond the in-memory "configured" flags.
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { AnalystConfigSchema } from './analysts/analystConfigSchema';
+import { SourcesTab, type SourcesTabHandle } from './analysts/SourcesTab';
 import { postAnalystParams, getAnalystParams } from '../api/analystParamsClient';
-import { postAnalystConfig } from '../api/analystConfigClient';
 import { getAnalystFlavors, postAnalystFlavors } from '../api/analystFlavorsClient';
 import type { AnalystFlavorDTO } from '../api/analystFlavorsClient';
 
@@ -40,11 +40,6 @@ export interface AnalystSettingsDialogProps {
   onFlavorSaved?: (analystId: string) => void;
 }
 
-interface SourceForm {
-  token: string;
-  uri: string;
-}
-
 type TabId = 'sources' | 'flavor' | 'weights';
 
 export function AnalystSettingsDialog({
@@ -59,7 +54,9 @@ export function AnalystSettingsDialog({
   onFlavorSaved,
 }: AnalystSettingsDialogProps) {
   const [weights, setWeights] = useState<Record<string, number>>({});
-  const [sources, setSources] = useState<Record<string, SourceForm>>({});
+  // Ref to the shared SourcesTab so the dialog's single Save button can commit
+  // the source credentials (token + Base URI) through the GPG-persisting path.
+  const sourcesRef = useRef<SourcesTabHandle>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -96,9 +93,6 @@ export function AnalystSettingsDialog({
     const initialWeights: Record<string, number> = {};
     for (const w of schema.weights) initialWeights[w.key] = w.default;
     setWeights(initialWeights);
-    const initialSources: Record<string, SourceForm> = {};
-    for (const s of schema.sources) initialSources[s.sourceId] = { token: '', uri: s.uriDefault };
-    setSources(initialSources);
     setFlavors([]);
     setSelectedFlavorId(null);
 
@@ -134,8 +128,6 @@ export function AnalystSettingsDialog({
 
   const setWeight = (key: string, value: number) =>
     setWeights((prev) => ({ ...prev, [key]: value }));
-  const setSourceField = (sourceId: string, field: keyof SourceForm, value: string) =>
-    setSources((prev) => ({ ...prev, [sourceId]: { ...prev[sourceId], [field]: value } }));
 
   // ── §10.6 flavor CRUD helpers ──────────────────────────────────────────────
   // Edit a field of the currently selected flavor.
@@ -193,25 +185,14 @@ export function AnalystSettingsDialog({
           params: { ...weights },
         });
       }
-      // 2) Save each source token + URI (if any).
-      for (const s of schema.sources) {
-        const form = sources[s.sourceId];
-        if (!form) continue;
-        // Only POST when the user supplied a token or a URI (avoid needless writes).
-        if (form.token.trim() || form.uri.trim()) {
-          await postAnalystConfig(
-            {
-              analystId,
-              sourceId: s.sourceId,
-              token: form.token.trim(),
-              extra: { uri: form.uri.trim() },
-            },
-            sessionId,
-          );
-        }
+      // 2) Save each source token + URI through the shared SourcesTab, which
+      //    POSTs to /analyst-config (the GPG-persisting path). Triggered here,
+      //    from the dialog's single Save button, so there is exactly one save
+      //    action across the per-analyst and global Settings dialogs.
+      if (schema.sources.length > 0) {
+        const ok = await sourcesRef.current?.save();
+        if (ok === false) return; // surface the error and stop the save chain
       }
-      // 3) §10.6: save the FULL edited flavor set + selection. The server
-      // validates ≥1 flavor, unique ids, exactly one isDefault, and non-empty
       // instructions — so we post the user's real edits, not placeholders.
       if (schema.flavors.length > 0 && flavors.length > 0 && selectedFlavorId) {
         const flavorsForPost = flavors.map((f) => ({
@@ -452,34 +433,13 @@ export function AnalystSettingsDialog({
           )}
 
           {activeTab === 'sources' && schema.sources.length > 0 && (
-            <fieldset className="settings-group">
-              <legend>Source credentials</legend>
-              {schema.sources.map((s) => (
-                <div key={s.sourceId} className="source-block">
-                  <h4>{s.label}</h4>
-                  <label className="settings-field">
-                    <span>{s.auth === 'bearer' ? 'Bearer token' : s.auth === 'apikey' ? 'API key' : 'Token'}</span>
-                    <input
-                      type="password"
-                      value={sources[s.sourceId]?.token ?? ''}
-                      placeholder="optional — leave blank to clear"
-                      onChange={(e) => setSourceField(s.sourceId, 'token', e.target.value)}
-                      aria-label={`${s.label} token`}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{s.uriLabel}</span>
-                    <input
-                      type="text"
-                      value={sources[s.sourceId]?.uri ?? ''}
-                      placeholder="https://…"
-                      onChange={(e) => setSourceField(s.sourceId, 'uri', e.target.value)}
-                      aria-label={`${s.label} ${s.uriLabel}`}
-                    />
-                  </label>
-                </div>
-              ))}
-            </fieldset>
+            <SourcesTab
+              ref={sourcesRef}
+              analystId={analystId}
+              sessionId={sessionId}
+              sources={schema.sources}
+              onSaved={onSaved}
+            />
           )}
 
           {error && (

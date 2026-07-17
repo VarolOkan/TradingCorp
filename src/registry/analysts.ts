@@ -81,7 +81,12 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
       id: 'alphaVantage',
       type: 'rest',
       endpoint: 'https://www.alphavantage.co/query',
-      auth: 'bearer',
+      // Alpha Vantage authenticates via an `apikey=` query parameter, NOT a
+      // Bearer header. Declaring it 'apikey' makes both the runtime acquisition
+      // engine (acquire.ts) and the [Test] health probe (probeSource) attach the
+      // token correctly. Declaring 'bearer' sent the key as a header the provider
+      // ignores and produced a spurious "Authentication failed — check the token".
+      auth: 'apikey',
       fields: ['fundamental', 'technical'],
       label: 'Alpha Vantage',
       sources: ['Alpha Vantage'],

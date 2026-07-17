@@ -12,7 +12,7 @@
 // echoes a raw token — it returns hasToken only.
 
 import path from 'path';
-import { TokenVault, createVault, resolveVaultUserId } from './llm-vault';
+import { TokenVault, createVault, getSharedVault, resolveVaultUserId } from './llm-vault';
 // Non-secret LLM selection persists to a JSON file (llm-json-store.ts) instead
 // of better-sqlite3: the native module has been flaky in this environment and
 // crashes the server at startup (ERR_DLOPEN_FAILED). SqliteLlmStore remains
@@ -264,7 +264,7 @@ export class LlmConfigStore {
 // (which has been flaky in this environment and crashed startup). Tokens
 // persist to an encrypted vault (gpg/AES) when LLM_VAULT_PASSPHRASE is
 // configured, else in-memory.
-const sharedVault = createVault();
+const sharedVault = getSharedVault();
 const sharedJson = new JsonLlmStore();
 export const llmConfigStore = new LlmConfigStore(defaultLlmConfigs(), sharedVault, sharedJson);
 

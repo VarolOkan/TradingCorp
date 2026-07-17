@@ -7,7 +7,7 @@
 //   - Server Log: live tail of logs/server.log
 // Tokens are sent to the server but never logged or echoed (hasToken chip only).
 
-import { useState, useEffect, FormEvent, Fragment, useRef } from 'react';
+import { useState, useEffect, FormEvent, Fragment, useRef, useMemo } from 'react';
 import { postSettings } from '../api/configClient';
 import { getLlmConfig, postLlmConfig, postLlmConfigTest, type LlmModelConfigPublic } from '../api/llmConfigClient';
 import {
@@ -24,9 +24,12 @@ import {
 import { applyRegistryAgencies, AGENCIES } from './analysts/agencies';
 import type { ConnectionSettings } from '../types';
 import type { LlmRole, LlmProvider } from '../../../src/server/llm-config';
-import type { AnalystDef, AnalystKind } from '../../../src/types/registry';
+import type { AnalystKind } from '../../../src/types/registry';
 import { getServerLog } from '../api/serverLogClient';
 import { getAnalystFlavors, postAnalystFlavors } from '../api/analystFlavorsClient';
+import { getAnalystSourceCatalog, type AnalystSourceCatalogAnalyst } from '../api/analystConfigClient';
+import { buildAnalystConfigSchema } from './analysts/analystConfigSchema';
+import { SourcesTab, type SourcesTabHandle } from './analysts/SourcesTab';
 
 export interface SettingsDialogProps {
   open: boolean;
@@ -43,7 +46,7 @@ export interface SettingsDialogProps {
   onRegistryChange?: () => void;
 }
 
-type Tab = 'connection' | 'llm' | 'agencies' | 'analysts' | 'log';
+type Tab = 'connection' | 'llm' | 'agencies' | 'analysts' | 'sources' | 'log';
 
 const DEFAULTS: ConnectionSettings = {
   baseUri: 'http://localhost:3001',
@@ -102,6 +105,31 @@ export function SettingsDialog({
   // saving another tab) never clobbers the model/provider/token the user is
   // still editing. Cleared after a successful load or save.
   const llmDirty = useRef(false);
+
+  // ---- Sources tab state (global Data Ingestion source credentials) ----
+  // Reuses the SAME shared SourcesTab component the per-analyst dialog uses,
+  // so the code is identical and BOTH persist to the GPG vault.
+  const [sourceCatalog, setSourceCatalog] = useState<AnalystSourceCatalogAnalyst | null>(null);
+  const [sourceCatalogError, setSourceCatalogError] = useState<string | null>(null);
+  const [vaultDisabled, setVaultDisabled] = useState(false);
+  const sourcesRef = useRef<SourcesTabHandle>(null);
+  const diSources = useMemo(() => {
+    if (!sourceCatalog) return [];
+    return buildAnalystConfigSchema('data_ingestion', 'Data Ingestion', sourceCatalog.sources).sources;
+  }, [sourceCatalog]);
+
+  // Fetch the catalog as soon as the dialog opens (not lazily on tab switch)
+  // so the Sources tab already has its inputs populated when the user opens it.
+  useEffect(() => {
+    if (!open) return;
+    setSourceCatalogError(null);
+    getAnalystSourceCatalog()
+      .then((cat) => {
+        setSourceCatalog(cat.analysts.find((a) => a.analystId === 'data_ingestion') ?? null);
+        setVaultDisabled(cat.vaultDisabled === true);
+      })
+      .catch((err) => setSourceCatalogError(err instanceof Error ? err.message : String(err)));
+  }, [open]);
 
   // ---- Server Log tab state ----
   const [logLines, setLogLines] = useState(200);
@@ -754,6 +782,16 @@ export function SettingsDialog({
             onClick={() => setTab('analysts')}
           >
             Analysts
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'sources'}
+            className={tab === 'sources' ? 'settings-tab active' : 'settings-tab'}
+            data-testid="tab-sources"
+            onClick={() => setTab('sources')}
+          >
+            Sources
           </button>
           <button
             type="button"
@@ -1617,6 +1655,66 @@ export function SettingsDialog({
             </fieldset>
 
             {analystError && <p className="settings-error" role="alert" data-testid="analyst-error">{analystError}</p>}
+          </div>
+        )}
+
+        {tab === 'sources' && (
+          <div className="sources-tab">
+            <h2>Data Ingestion — Source Credentials</h2>
+            <p className="settings-hint">
+              Per-source API keys &amp; Base URIs for the Data Ingestion analyst. Saved
+              credentials are encrypted (GPG/AES) and persist across restarts. Alpha Vantage
+              and Finnhub Base URIs are pre-filled — just confirm or edit.
+            </p>
+            {sourceCatalogError && (
+              <p className="settings-error" role="alert">{sourceCatalogError}</p>
+            )}
+            {vaultDisabled && (
+              <p className="settings-warn" role="alert" data-testid="vault-disabled-warning">
+                ⚠ Token storage is disabled on the server (no LLM_VAULT_PASSPHRASE set). Saved
+                credentials are kept in memory only and will be lost on restart. Set the
+                LLM_VAULT_PASSPHRASE env var to enable encrypted persistence.
+              </p>
+            )}
+            {!sourceCatalogError && diSources.length === 0 && !sourceCatalog && (
+              <p className="settings-hint">Loading source catalog…</p>
+            )}
+            {diSources.length === 0 && sourceCatalog && (
+              <p className="settings-hint">Data Ingestion has no credentialed sources.</p>
+            )}
+            {diSources.length > 0 && (
+              <SourcesTab
+                ref={sourcesRef}
+                analystId="data_ingestion"
+                sessionId={sessionId}
+                sources={diSources}
+              />
+            )}
+            {diSources.length > 0 && (
+              <div className="settings-actions">
+                <button type="button" onClick={onClose}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await sourcesRef.current?.save();
+                    // Re-fetch so the "stored" indicator is truthful on reopen,
+                    // then close the dialog (the Accept button commits + dismisses).
+                    getAnalystSourceCatalog()
+                      .then((cat) => {
+                        setSourceCatalog(cat.analysts.find((a) => a.analystId === 'data_ingestion') ?? null);
+                        setVaultDisabled(cat.vaultDisabled === true);
+                      })
+                      .catch(() => {})
+                      .finally(() => onClose());
+                  }}
+                  data-testid="sources-save"
+                >
+                  Accept
+                </button>
+              </div>
+            )}
           </div>
         )}
 

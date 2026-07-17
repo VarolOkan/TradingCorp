@@ -17,6 +17,20 @@
 import type { AnalystDef } from '../types/registry';
 
 /**
+ * Canonical per-source Base URIs. When a source declares a `uriRequired`
+ * credential field, the Settings UI pre-fills this as the default Base URI so
+ * the user only has to confirm it (no typing the endpoint by hand). Keyed by
+ * the source id declared on the AnalystDef's dataSources.
+ */
+const DEFAULT_SOURCE_URIS: Record<string, string> = {
+  alphaVantage: 'https://www.alphavantage.co/query',
+  finnhub: 'https://finnhub.io/api/v1',
+  polygonOptions: 'https://api.polygon.io/v3/snapshot/options/{ticker}',
+  polygonHist: 'https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}',
+  treasuryRfr: 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates',
+};
+
+/**
  * Analyst id union. Mirrors frontend/src/components/analysts/analysts.ts
  * `AnalystId` but is declared here to keep the backend module free of a
  * frontend path import (separate tsconfig / vitest scope).
@@ -160,7 +174,9 @@ export function buildAnalystConfigSchema(
       auth: (s.auth === 'bearer' || s.auth === 'apikey' ? s.auth : 'token') as SourceCredField['auth'],
       uriRequired: true,
       uriLabel: 'Base URI',
-      uriDefault: '',
+      // Pre-fill each known source's canonical endpoint so the user only
+      // confirms (no typing). Unlisted sources fall back to '' (user enters).
+      uriDefault: DEFAULT_SOURCE_URIS[s.id] ?? '',
     }));
 
   return {

@@ -41,6 +41,10 @@ export interface AnalysisViewProps {
    *  re-renders from the mutated AGENCIES mirror. Combined with the view's own
    *  re-org version bump. */
   registryVersion?: number;
+  /** Called after a source credential is saved (per-analyst dialog) so the
+   *  parent can refresh the catalog and the "stored" indicator stays truthful
+   *  on the next open. */
+  onSourceSaved?: () => void;
 }
 
 export function AnalysisView({
@@ -53,6 +57,7 @@ export function AnalysisView({
   agencyId: agencyIdProp,
   onAgencyChange,
   registryVersion: registryVersionProp = 0,
+  onSourceSaved,
 }: AnalysisViewProps) {
   // Configured-source tracking lives here now: the gear (owned here) sets the
   // dialog's state here too, so clicking the gear actually opens the token
@@ -427,9 +432,11 @@ export function AnalysisView({
         agencyId={agencyId}
         schema={settingsAnalyst ? settingsSchemas[settingsAnalyst]! : ({} as AnalystConfigSchema)}
         sessionId={sessionId}
-        onSaved={(id) =>
-          setConfiguredAnalystIds((prev) => new Set(prev).add(id))
-        }
+        onSaved={(id) => {
+          setConfiguredAnalystIds((prev) => new Set(prev).add(id));
+          // Refresh the catalog so the "stored" indicator is truthful next open.
+          onSourceSaved?.();
+        }}
         onFlavorSaved={reloadFlavors}
       />
 

@@ -27,6 +27,8 @@ export interface SourceCredField {
   uriRequired: boolean;
   uriLabel: string;
   uriDefault: string;
+  /** True if a token/URI has already been stored for this source. */
+  hasToken: boolean;
 }
 
 export interface AnalystConfigSchema {
@@ -44,6 +46,20 @@ export interface AnalystFlavorField {
   name: string;
   role: string;
 }
+
+/**
+ * Canonical per-source Base URIs (mirrors the backend
+ * src/registry/analyst-config-schema.ts DEFAULT_SOURCE_URIS). The Settings
+ * UI pre-fills this as the default Base URI for a credentialed source so the
+ * user only confirms it. Keyed by source id.
+ */
+const DEFAULT_SOURCE_URIS: Record<string, string> = {
+  alphaVantage: 'https://www.alphavantage.co/query',
+  finnhub: 'https://finnhub.io/api/v1',
+  polygonOptions: 'https://api.polygon.io/v3/snapshot/options/{ticker}',
+  polygonHist: 'https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}',
+  treasuryRfr: 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates',
+};
 
 /** Static tunable weights per analyst (mirrors backend ALLOWED_PARAM_KEYS). */
 const TUNABLE_WEIGHTS: Record<string, Omit<WeightField, 'kind' | 'default'>[]> = {
@@ -118,7 +134,10 @@ export function buildAnalystConfigSchema(
       auth: (s.auth === 'bearer' || s.auth === 'apikey' ? s.auth : 'token') as SourceCredField['auth'],
       uriRequired: true,
       uriLabel: 'Base URI',
-      uriDefault: '',
+      // Pre-fill each known source's canonical endpoint (mirrors backend
+      // DEFAULT_SOURCE_URIS) so the user only confirms.
+      uriDefault: DEFAULT_SOURCE_URIS[s.id] ?? '',
+      hasToken: s.hasToken === true,
     }));
 
   return { analystId, name, weights, sources, flavors: [], hasConfig: weights.length + sources.length > 0 };

@@ -3,12 +3,25 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SettingsDialog } from '../components/SettingsDialog';
 import * as configClient from '../api/configClient';
 
+const analystMock = {
+  getAnalystSourceCatalog: vi.fn().mockResolvedValue({ analysts: [], vaultDisabled: false }),
+  postAnalystConfig: vi.fn().mockResolvedValue({ ok: true, hasToken: false }),
+};
+vi.mock('../api/analystConfigClient', () => ({
+  getAnalystSourceCatalog: (...args: any[]) => analystMock.getAnalystSourceCatalog(...args),
+  postAnalystConfig: (...args: any[]) => analystMock.postAnalystConfig(...args),
+}));
+
 describe('SettingsDialog', () => {
   const onClose = vi.fn();
   const onSaved = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Re-apply default analyst-config mock implementations (clearAllMocks keeps
+    // them, but re-assert so per-test overrides don't leak between tests).
+    analystMock.getAnalystSourceCatalog.mockResolvedValue({ analysts: [], vaultDisabled: false });
+    analystMock.postAnalystConfig.mockResolvedValue({ ok: true, hasToken: false });
   });
 
   it('renders nothing when closed', () => {
@@ -324,6 +337,37 @@ describe('SettingsDialog Server Log tab', () => {
       'noopener,noreferrer',
     );
     openSpy.mockRestore();
+  });
+
+  it('Sources tab [Accept] saves and closes the dialog (regression: it used to save but not close)', async () => {
+    analystMock.getAnalystSourceCatalog.mockResolvedValue({
+      analysts: [
+        {
+          analystId: 'data_ingestion',
+          name: 'Data Ingestion',
+          sources: [
+            { id: 'alphaVantage', label: 'Alpha Vantage', auth: 'bearer', hasToken: false },
+            { id: 'finnhub', label: 'Finnhub', auth: 'bearer', hasToken: false },
+          ],
+        },
+      ],
+      vaultDisabled: false,
+    });
+    analystMock.postAnalystConfig.mockResolvedValue({ ok: true, sessionId: 'default', analystId: 'data_ingestion', sourceId: 'finnhub', hasToken: true });
+
+    render(<SettingsDialog open onClose={onClose} />);
+    // Open the Sources tab.
+    fireEvent.click(screen.getByTestId('tab-sources'));
+    await waitFor(() => expect(screen.getByText('Alpha Vantage')).toBeInTheDocument());
+
+    // Type a token so [Accept] actually persists (a blank token + default URI is
+    // now a no-op by design — it must NOT clobber a stored token).
+    fireEvent.change(screen.getByLabelText('Alpha Vantage token'), { target: { value: 'av-new' } });
+
+    // Accept must persist AND close the dialog.
+    fireEvent.click(screen.getByTestId('sources-save'));
+    await waitFor(() => expect(analystMock.postAnalystConfig).toHaveBeenCalled());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
 

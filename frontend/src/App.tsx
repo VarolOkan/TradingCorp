@@ -185,6 +185,7 @@ function App() {
           agencyId={agencyId}
           onAgencyChange={setAgencyId}
           registryVersion={registryVersion}
+          onSourceSaved={refreshSourceCatalog}
         />
       </main>
 

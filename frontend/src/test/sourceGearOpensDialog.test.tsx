@@ -14,9 +14,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import AnalysisView from '../components/AnalysisView';
 import * as flavorClient from '../api/analystFlavorsClient';
+import * as analystConfigClient from '../api/analystConfigClient';
 
 vi.mock('../api/analystFlavorsClient', () => ({
   getAnalystFlavors: (...args: any[]) => (flavorClient as any).getAnalystFlavors(...args),
+}));
+
+vi.mock('../api/analystConfigClient', () => ({
+  getAnalystSourceCatalog: (...args: any[]) => (analystConfigClient as any).getAnalystSourceCatalog(...args),
+  postAnalystConfig: (...args: any[]) => (analystConfigClient as any).postAnalystConfig(...args),
 }));
 
 describe('data_ingestion gear opens the unified tabbed Settings dialog', () => {
@@ -40,9 +46,9 @@ describe('data_ingestion gear opens the unified tabbed Settings dialog', () => {
               analystId: 'data_ingestion',
               name: 'Data Ingestion',
               sources: [
-                { id: 'yahoo', label: 'Yahoo Finance', auth: 'apikey' },
-                { id: 'alphaVantage', label: 'Alpha Vantage', auth: 'bearer' },
-                { id: 'finnhub', label: 'Finnhub', auth: 'bearer' },
+                { id: 'yahoo', label: 'Yahoo Finance', auth: 'apikey', hasToken: false },
+                { id: 'alphaVantage', label: 'Alpha Vantage', auth: 'bearer', hasToken: false },
+                { id: 'finnhub', label: 'Finnhub', auth: 'bearer', hasToken: false },
               ],
             },
           ],
@@ -69,5 +75,54 @@ describe('data_ingestion gear opens the unified tabbed Settings dialog', () => {
     });
     expect(screen.getByText('Alpha Vantage')).toBeTruthy();
     expect(screen.getByText('Finnhub')).toBeTruthy();
+  });
+
+  it('saving the dialog persists source credentials via the single Save button', async () => {
+    vi.spyOn(flavorClient, 'getAnalystFlavors').mockResolvedValue({
+      sessionId: 'default',
+      agencyId: 'options-swing',
+      analystId: 'vol_surface',
+      flavors: [],
+      selectedId: '',
+    });
+    const postSpy = vi
+      .spyOn(analystConfigClient, 'postAnalystConfig')
+      .mockResolvedValue({ ok: true, sessionId: 'default', analystId: 'data_ingestion', sourceId: 'finnhub', hasToken: true });
+
+    render(
+      <AnalysisView
+        socket={null}
+        connected={false}
+        sessionId="default"
+        sourceCatalog={{
+          analysts: [
+            {
+              analystId: 'data_ingestion',
+              name: 'Data Ingestion',
+              sources: [
+                { id: 'yahoo', label: 'Yahoo Finance', auth: 'apikey', hasToken: false },
+                { id: 'alphaVantage', label: 'Alpha Vantage', auth: 'bearer', hasToken: false },
+                { id: 'finnhub', label: 'Finnhub', auth: 'bearer', hasToken: false },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('panel-gear-data_ingestion'));
+    await waitFor(() => expect(screen.getByText('Data Ingestion · Settings')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('tab-sources'));
+    await waitFor(() => expect(screen.getByText('Finnhub')).toBeTruthy());
+
+    // Type a token into the Finnhub field and click the dialog's single Save.
+    fireEvent.change(screen.getByLabelText('Finnhub token'), { target: { value: 'fh-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ analystId: 'data_ingestion', sourceId: 'finnhub', token: 'fh-secret' }),
+      'default',
+    );
   });
 });
