@@ -166,6 +166,24 @@ export function AnalysisView({
       meta.name,
       cat ? cat.sources : [],
     );
+    // Surface the Polygon options sources in the Data Ingestion card's Settings
+    // dialog too (mirrors the General dialog → Sources tab). Polygon is always
+    // resolved/stored under `options_ingestion`, so tag each with that
+    // analystId so the saved key lands where the options engine acquires it —
+    // not under data_ingestion (which never consumes Polygon).
+    if (meta.id === 'data_ingestion') {
+      const optCat = sourceCatalog.analysts.find((c) => c.analystId === 'options_ingestion');
+      if (optCat && optCat.sources.length > 0) {
+        const optSources = buildAnalystConfigSchema(
+          'options_ingestion',
+          'Options Ingestion',
+          optCat.sources,
+        ).sources;
+        for (const s of optSources) {
+          schema.sources.push({ ...s, analystId: 'options_ingestion' });
+        }
+      }
+    }
     // Phase F: attach the analyst's shipped flavor set (drives the Flavors
     // section + gear in the Settings dialog). Fetched once per agency change.
     const fl = liveFlavorsById[meta.id];

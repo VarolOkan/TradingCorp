@@ -144,4 +144,123 @@ describe('SourcesTab (shared, GPG-persisting, single Save button)', () => {
       expect(await screen.findByText(/HTTP 500/)).toBeInTheDocument();
     });
   });
+
+  describe('per-source analystId override (General dialog shows options sources under options_ingestion)', () => {
+    // The General Settings → Sources tab reuses THIS component but renders Polygon
+    // options sources that live under the `options_ingestion` analyst. They MUST
+    // POST under `options_ingestion` (where the options engine resolves them),
+    // NOT under the tab's display analyst (`data_ingestion`).
+    const sourcesMixed: SourceCredField[] = [
+      { sourceId: 'alphaVantage', label: 'Alpha Vantage', auth: 'apikey', uriRequired: true, uriLabel: 'Base URI', uriDefault: 'https://www.alphavantage.co/query', hasToken: false },
+      { sourceId: 'polygonOptions', label: 'Polygon Options', auth: 'bearer', uriRequired: true, uriLabel: 'Base URI', uriDefault: 'https://api.polygon.io/v3/snapshot/options/{ticker}', hasToken: false, analystId: 'options_ingestion' },
+    ];
+
+    it('POSTs a per-source-override source under its OWN analystId', async () => {
+      const spy = vi.spyOn(analystConfigClient, 'postAnalystConfig').mockResolvedValue({
+        ok: true, sessionId: 'default', analystId: 'options_ingestion', sourceId: 'polygonOptions', hasToken: true,
+      });
+      const ref = createRef<SourcesTabHandle>();
+      render(<SourcesTab ref={ref} analystId="data_ingestion" sessionId="s1" sources={sourcesMixed} />);
+      fireEvent.change(screen.getByLabelText('Polygon Options token'), { target: { value: 'poly-key' } });
+
+      const ok = await ref.current!.save();
+      expect(ok).toBe(true);
+      await waitFor(() => expect(spy).toHaveBeenCalled());
+      expect(spy).toHaveBeenCalledWith(
+        { analystId: 'options_ingestion', sourceId: 'polygonOptions', token: 'poly-key', extra: { uri: 'https://api.polygon.io/v3/snapshot/options/{ticker}' } },
+        's1',
+      );
+      // The Alpha Vantage row (no override) still saves under the tab analyst.
+      expect(spy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sourceId: 'alphaVantage', analystId: 'options_ingestion' }),
+        's1',
+      );
+    });
+
+    it('[Test] button probes the overridden analystId too', async () => {
+      const spy = vi.spyOn(analystConfigClient, 'testAnalystConfig').mockResolvedValue({ ok: true, sourceId: 'polygonOptions', hasToken: true, latencyMs: 175 });
+      const ref = createRef<SourcesTabHandle>();
+      render(<SourcesTab ref={ref} analystId="data_ingestion" sessionId="s1" sources={sourcesMixed} />);
+      fireEvent.click(screen.getByRole('button', { name: /Test Polygon Options connection/i }));
+      await waitFor(() => expect(spy).toHaveBeenCalledWith('options_ingestion', 'polygonOptions', 's1'));
+      expect(await screen.findByText(/OK · 175ms/)).toBeInTheDocument();
+    });
+  });
+
+  describe('key group (single shared key, endpoints listed underneath)', () => {
+    // Polygon/Massive options snapshot + daily aggregates share ONE Massive key.
+    // They declare a common keyGroup so the UI shows a single token field and
+    // fans the typed key out to BOTH members on save.
+    const sourcesGrouped: SourceCredField[] = [
+      {
+        sourceId: 'polygonOptions', label: 'Polygon Options', auth: 'bearer', uriRequired: true,
+        uriLabel: 'Base URI', uriDefault: 'https://api.massive.com/v3/snapshot/options/{ticker}',
+        hasToken: false, analystId: 'options_ingestion',
+        keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Options snapshot',
+      },
+      {
+        sourceId: 'polygonHist', label: 'Polygon Aggregates', auth: 'bearer', uriRequired: true,
+        uriLabel: 'Base URI', uriDefault: 'https://api.massive.com/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}',
+        hasToken: false, analystId: 'options_ingestion',
+        keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Daily aggregates',
+      },
+    ];
+
+    it('renders ONE shared key field labelled "Massive/Polygon Options" with each endpoint listed', () => {
+      const ref = createRef<SourcesTabHandle>();
+      render(<SourcesTab ref={ref} analystId="data_ingestion" sessionId="default" sources={sourcesGrouped} />);
+      // Exactly one password (token) input for the whole group.
+      const tokenInputs = screen.getAllByLabelText(/Massive\/Polygon Options token/i);
+      expect(tokenInputs).toHaveLength(1);
+      // Group heading present.
+      expect(screen.getByRole('heading', { name: /Massive\/Polygon Options/i })).toBeInTheDocument();
+      // Each member's endpoint URI is listed under its endpointLabel.
+      expect(screen.getByLabelText('Polygon Options Base URI')).toHaveValue('https://api.massive.com/v3/snapshot/options/{ticker}');
+      expect(screen.getByLabelText('Polygon Aggregates Base URI')).toHaveValue('https://api.massive.com/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}');
+      expect(screen.getByText('Options snapshot')).toBeInTheDocument();
+      expect(screen.getByText('Daily aggregates')).toBeInTheDocument();
+    });
+
+    it('save() fans the single typed key out to BOTH members under options_ingestion', async () => {
+      const spy = vi.spyOn(analystConfigClient, 'postAnalystConfig').mockResolvedValue({
+        ok: true, sessionId: 'default', analystId: 'options_ingestion', sourceId: 'polygonOptions', hasToken: true,
+      });
+      const ref = createRef<SourcesTabHandle>();
+      render(<SourcesTab ref={ref} analystId="data_ingestion" sessionId="s1" sources={sourcesGrouped} />);
+      fireEvent.change(screen.getByLabelText(/Massive\/Polygon Options token/i), { target: { value: 'massive-key' } });
+
+      const ok = await ref.current!.save();
+      expect(ok).toBe(true);
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+      expect(spy).toHaveBeenCalledWith(
+        { analystId: 'options_ingestion', sourceId: 'polygonOptions', token: 'massive-key', extra: { uri: 'https://api.massive.com/v3/snapshot/options/{ticker}' } },
+        's1',
+      );
+      expect(spy).toHaveBeenCalledWith(
+        { analystId: 'options_ingestion', sourceId: 'polygonHist', token: 'massive-key', extra: { uri: 'https://api.massive.com/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}' } },
+        's1',
+      );
+    });
+
+    it('the group "stored" chip flips to stored only after BOTH members save', async () => {
+      vi.spyOn(analystConfigClient, 'postAnalystConfig').mockResolvedValue({
+        ok: true, sessionId: 'default', analystId: 'options_ingestion', sourceId: 'polygonOptions', hasToken: true,
+      });
+      const ref = createRef<SourcesTabHandle>();
+      render(<SourcesTab ref={ref} analystId="data_ingestion" sessionId="default" sources={sourcesGrouped} />);
+      expect(screen.getByLabelText('Massive/Polygon Options not stored')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText(/Massive\/Polygon Options token/i), { target: { value: 'massive-key' } });
+      await ref.current!.save();
+      await waitFor(() => expect(screen.getByLabelText('Massive/Polygon Options key stored')).toBeInTheDocument());
+    });
+
+    it('each grouped endpoint still has its OWN [Test] button probing options_ingestion', async () => {
+      const spy = vi.spyOn(analystConfigClient, 'testAnalystConfig').mockResolvedValue({ ok: true, sourceId: 'polygonHist', hasToken: true, latencyMs: 88 });
+      const ref = createRef<SourcesTabHandle>();
+      render(<SourcesTab ref={ref} analystId="data_ingestion" sessionId="s1" sources={sourcesGrouped} />);
+      fireEvent.click(screen.getByRole('button', { name: /Test Polygon Aggregates connection/i }));
+      await waitFor(() => expect(spy).toHaveBeenCalledWith('options_ingestion', 'polygonHist', 's1'));
+      expect(await screen.findByText(/OK · 88ms/)).toBeInTheDocument();
+    });
+  });
 });

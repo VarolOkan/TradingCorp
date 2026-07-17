@@ -22,12 +22,13 @@ import type { AnalystDef } from '../types/registry';
  * the user only has to confirm it (no typing the endpoint by hand). Keyed by
  * the source id declared on the AnalystDef's dataSources.
  */
-const DEFAULT_SOURCE_URIS: Record<string, string> = {
+export const DEFAULT_SOURCE_URIS: Record<string, string> = {
   alphaVantage: 'https://www.alphavantage.co/query',
   finnhub: 'https://finnhub.io/api/v1',
-  polygonOptions: 'https://api.polygon.io/v3/snapshot/options/{ticker}',
-  polygonHist: 'https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}',
-  treasuryRfr: 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates',
+  // Polygon's REST API is served from api.massive.com (Bearer or ?apiKey=).
+  polygonOptions: 'https://api.massive.com/v3/snapshot/options/{ticker}',
+  polygonHist: 'https://api.massive.com/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}',
+  treasuryRfr: 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates?filter=security_type_desc:eq:Marketable,security_desc:eq:Total Marketable&sort=-record_date&page[size]=1',
 };
 
 /**

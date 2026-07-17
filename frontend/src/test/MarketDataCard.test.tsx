@@ -234,6 +234,39 @@ describe('MarketDataCard (Phase M)', () => {
     expect(putOtmCount).toBe(1); // strike 190
   });
 
+  it('shows a VISIBLE warning (not just a tooltip) when a key is set but the live options call failed (e.g. 401 entitlement)', async () => {
+    // Semantic-honesty: a configured key + a Massive 401 must not be presented
+    // as a silent "simulated · no live feed" mock. The backend now returns a
+    // `note` naming the failure, and the UI must surface it visibly.
+    const failedMock: OptionChainResult = {
+      ...chain,
+      source: 'mock',
+      note: 'MOCK — a Massive/Polygon key was configured but the live option-chain call failed (live call returned HTTP 401). See backend [options] logs.',
+    };
+    vi.spyOn(optionsClient, 'getOptionChain').mockResolvedValue(failedMock);
+    render(<MarketDataCard symbol="NVDA" />);
+    fireEvent.click(screen.getByTestId('market-tab-options'));
+    const warn = await screen.findByTestId('options-live-failed');
+    expect(warn).toBeInTheDocument();
+    expect(warn.textContent).toContain('HTTP 401');
+    // The headline badge can still read MOCK (no live chain), but it must NOT
+    // claim "no live feed" as if no key were configured.
+    expect(screen.getByTestId('options-source').textContent).toBe('MOCK');
+  });
+
+  it('does NOT show the live-failed warning for a plain no-key mock (silent seed)', async () => {
+    const plainMock: OptionChainResult = {
+      ...chain,
+      source: 'mock',
+      note: 'Live option chain unavailable — showing deterministic mock chain.',
+    } as OptionChainResult;
+    vi.spyOn(optionsClient, 'getOptionChain').mockResolvedValue(plainMock);
+    render(<MarketDataCard symbol="AAPL" />);
+    fireEvent.click(screen.getByTestId('market-tab-options'));
+    await waitFor(() => expect(screen.getByTestId('options-chain-panes')).toBeInTheDocument());
+    expect(screen.queryByTestId('options-live-failed')).toBeNull();
+  });
+
   it('highlights the active (ATM, nearest-to-spot) row across both panes + center strike', async () => {
     vi.spyOn(optionsClient, 'getOptionChain').mockResolvedValue(chain);
     render(<MarketDataCard symbol="AAPL" />);

@@ -26,6 +26,7 @@ import { registerQuoteRoutes } from './quote-routes';
 import { makeYahooFundFetch } from './quote';
 import { registerHistoryRoutes } from './history-routes';
 import { registerOptionsHistoryRoutes } from './options-history-routes';
+import { registerOptionsDebugRoutes } from './options-debug-routes';
 import { registerServerLogRoutes } from './server-log-routes';
 import { registerReportRoutes } from './report-routes';
 import { registerRegistryRoutes } from './registry-routes';
@@ -230,6 +231,7 @@ class AnalysisServer {
     registerQuoteRoutes(this.app, undefined, makeYahooFundFetch());
     registerHistoryRoutes(this.app);
     registerOptionsHistoryRoutes(this.app);
+    registerOptionsDebugRoutes(this.app);
     registerServerLogRoutes(this.app);
     registerReportRoutes(this.app);
     registerRegistryRoutes(this.app);

@@ -97,6 +97,45 @@ describe('GET /options-history route (Phase I)', () => {
     expect(res.status).toBe(200);
     expect(res.body.source).toBe('mock');
   });
+
+  it('resolves the VAULT key (Settings UI channel) and takes the LIVE path with no injected fetchFn', async () => {
+    // Regression: the Options tab showed MOCK even after the user set + tested
+    // the Massive/Polygon key, because this route only read process.env and
+    // ignored the vault key the Settings UI writes (options_ingestion/polygonOptions).
+    const { analystConfigStore } = await import('../server/analyst-config');
+    analystConfigStore.set(
+      { sessionId: 'default', analystId: 'options_ingestion', sourceId: 'polygonOptions' },
+      { token: 'vault-massive-key' },
+    );
+    // Stub the global fetch fetchOptionChain uses when no fetchFn is injected;
+    // assert the vault key reached the outgoing request as a Bearer header
+    // (the auth scheme the [Test] probe + engine use — NOT a ?apiKey= param,
+    // which Massive rejects) and the URL is the bare api.massive.com endpoint.
+    const seenUrls: string[] = [];
+    const seenAuth: string[] = [];
+    const g: any = globalThis;
+    const prevFetch = g.fetch;
+    g.fetch = async (url: string, headers?: Record<string, string>) => {
+      seenUrls.push(String(url));
+      if (headers?.Authorization) seenAuth.push(headers.Authorization);
+      return { ok: true, status: 200, json: async () => polygonSnapshot() };
+    };
+    try {
+      const app = express();
+      app.use(express.json());
+      registerOptionsHistoryRoutes(app); // NO fetchFn injected — must resolve vault key itself
+      const res = await request(app).get('/options-history?symbol=AAPL');
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('polygon'); // LIVE, not mock
+      expect(seenUrls.some((u) => u.includes('api.massive.com'))).toBe(true);
+      expect(seenUrls.some((u) => u.includes('/v3/snapshot/options/AAPL'))).toBe(true);
+      expect(seenUrls.some((u) => u.includes('apiKey='))).toBe(false); // not a query-param key
+      expect(seenAuth.some((h) => h === 'Bearer vault-massive-key')).toBe(true);
+    } finally {
+      g.fetch = prevFetch;
+      analystConfigStore.clear({ sessionId: 'default', analystId: 'options_ingestion', sourceId: 'polygonOptions' });
+    }
+  });
 });
 
 describe('GET /options-history greeks (Phase 17)', () => {
@@ -108,8 +147,13 @@ describe('GET /options-history greeks (Phase 17)', () => {
     expect(res.body.greeks.length).toBe(res.body.quotes.length);
     for (const g of res.body.greeks) {
       // delta bounds: call in [0,1], put in [-1,0]
-      if (g.type === 'C') expect(g.delta).toBeGreaterThanOrEqual(0) && expect(g.delta).toBeLessThanOrEqual(1);
-      else expect(g.delta).toBeGreaterThanOrEqual(-1) && expect(g.delta).toBeLessThanOrEqual(0);
+      if (g.type === 'C') {
+        expect(g.delta).toBeGreaterThanOrEqual(0);
+        expect(g.delta).toBeLessThanOrEqual(1);
+      } else {
+        expect(g.delta).toBeGreaterThanOrEqual(-1);
+        expect(g.delta).toBeLessThanOrEqual(0);
+      }
       expect(Number.isFinite(g.gamma)).toBe(true);
       expect(Number.isFinite(g.vega)).toBe(true);
       expect(Number.isFinite(g.theta)).toBe(true);

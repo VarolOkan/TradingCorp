@@ -227,5 +227,25 @@ describe('Data Ingestion handler', () => {
       expect(out.fundamental_data.AAPL.fundamental_source).toBeUndefined();
       expect(out.data_quality.liveSources).not.toContain('alphaVantage');
     });
+
+    it('reports honest completeness/freshness when AV is live but Yahoo is not', async () => {
+      // Yahoo down, Alpha Vantage up.
+      const dualFetch = async (url: string) => {
+        if (/alphavantage\.co/.test(url)) {
+          return { ok: true, status: 200, json: async () => ({
+            Symbol: 'AAPL', DebtEquityRatio: '1.45', CurrentRatio: '0.88',
+            ReturnOnEquityTTM: '147', ReturnOnAssetsTTM: '22', ProfitMargin: '24',
+            OperatingCashflow: '110000000000', MarketCapitalization: '3000000000000',
+          }) };
+        }
+        return { ok: false, status: 500, json: async () => ({}) }; // Yahoo unreachable
+      };
+      const out = await fetchRealFinancialData({ tickers: ['AAPL'] }, dualFetch as any, undefined, undefined, 'AV_TEST_KEY');
+      expect(out.data_quality.liveSources).toContain('alphaVantage');
+      // completeness reflects partial live (90-95), NOT the seeded 80-99 baseline,
+      // and freshness is 0 (a live source answered).
+      expect(out.data_quality.completeness).toBeGreaterThanOrEqual(90);
+      expect(out.data_quality.freshness).toBe(0);
+    });
   });
 });

@@ -125,4 +125,59 @@ describe('data_ingestion gear opens the unified tabbed Settings dialog', () => {
       'default',
     );
   });
+
+  it('Data Ingestion Sources tab also surfaces Polygon (stored under options_ingestion)', async () => {
+    vi.spyOn(flavorClient, 'getAnalystFlavors').mockResolvedValue({
+      sessionId: 'default',
+      agencyId: 'options-swing',
+      analystId: 'vol_surface',
+      flavors: [],
+      selectedId: '',
+    });
+
+    render(
+      <AnalysisView
+        socket={null}
+        connected={false}
+        sessionId="default"
+        sourceCatalog={{
+          analysts: [
+            {
+              analystId: 'data_ingestion',
+              name: 'Data Ingestion',
+              sources: [
+                { id: 'yahoo', label: 'Yahoo Finance', auth: 'apikey', hasToken: false },
+                { id: 'alphaVantage', label: 'Alpha Vantage', auth: 'bearer', hasToken: false },
+                { id: 'finnhub', label: 'Finnhub', auth: 'bearer', hasToken: false },
+              ],
+            },
+            {
+              // Polygon belongs to options_ingestion but must ALSO appear in the
+              // Data Ingestion card's Sources tab (and save under options_ingestion).
+              analystId: 'options_ingestion',
+              name: 'Options Ingestion',
+              sources: [
+                { id: 'polygonOptions', label: 'Polygon Options', auth: 'bearer', hasToken: false },
+                { id: 'polygonHist', label: 'Polygon Aggregates', auth: 'bearer', hasToken: false },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('panel-gear-data_ingestion'));
+    await waitFor(() => expect(screen.getByText('Data Ingestion · Settings')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('tab-sources'));
+
+    // Data Ingestion's own sources are present...
+    await waitFor(() => expect(screen.getByText('Alpha Vantage')).toBeTruthy());
+    expect(screen.getByText('Finnhub')).toBeTruthy();
+    // ...AND Polygon Options / Aggregates (which live under options_ingestion)
+    // are now visible here too. Treasury RFR is auth:'none' (no key needed) so
+    // it is intentionally NOT in the credentialed catalog — it is fetched live
+    // directly from its hardcoded endpoint, with no UI entry.
+    expect(screen.getByText('Polygon Options')).toBeTruthy();
+    expect(screen.getByText('Polygon Aggregates')).toBeTruthy();
+  });
 });

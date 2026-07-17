@@ -232,7 +232,7 @@ describe('acquireForAnalyst — analyst-level flow', () => {
     );
     expect(acc.sourceStatus).toEqual({ yahoo: 'ok', alpha: 'ok' });
     expect(acc.degraded).toBe(false);
-    expect(acc.merged).toMatchObject({ price: 1, eps: 2 });
+    expect(acc.merged).toMatchObject({ yahoo: { price: 1 }, alpha: { eps: 2 } });
   });
 
   it('Yahoo tokenless nested envelope → yahoo ok; keyed sources degrade (real data_ingestion flow)', async () => {
@@ -381,7 +381,7 @@ describe('acquireForAnalyst — analyst-level flow', () => {
       { fetchFn },
     );
     expect(acc.sourceStatus.yahoo).toBe('fallback');
-    expect(acc.merged).toMatchObject({ price: 9 });
+    expect(acc.merged).toMatchObject({ alpha: { price: 9 } });
   });
 });
 

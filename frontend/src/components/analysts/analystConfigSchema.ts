@@ -29,6 +29,30 @@ export interface SourceCredField {
   uriDefault: string;
   /** True if a token/URI has already been stored for this source. */
   hasToken: boolean;
+  /**
+   * The analyst the token is actually STORED + RESOLVED under. Usually the
+   * same as the tab's `analystId`, but the General dialog reuses this one
+   * component for sources that belong to a DIFFERENT analyst (e.g. Polygon
+   * options sources live under `options_ingestion`, even though they are
+   * shown in the global Data Ingestion → Sources tab). When set, the POST
+   * + health-probe use THIS id so the saved key lands where the engine
+   * resolves it — not under the tab's display analyst.
+   */
+  analystId?: string;
+  /**
+   * Optional KEY-SHARING group. Sources that share the SAME upstream API key
+   * (e.g. Polygon/Massive's options snapshot AND daily aggregates both use one
+   * Massive key) declare the same `keyGroup`. The Sources editor then renders a
+   * SINGLE token field for the group and lists each member's endpoint beneath
+   * it. On save the one token is written to EVERY member (under each member's
+   * own sourceId + analystId), so the engine resolves it for all of them.
+   */
+  keyGroup?: string;
+  /** Heading shown for a collapsed key group (e.g. 'Massive/Polygon Options'). */
+  keyGroupLabel?: string;
+  /** Short human label for THIS source's endpoint within a group row
+   *  (e.g. 'Options snapshot', 'Daily aggregates'). Falls back to `label`. */
+  endpointLabel?: string;
 }
 
 export interface AnalystConfigSchema {
@@ -56,8 +80,8 @@ export interface AnalystFlavorField {
 const DEFAULT_SOURCE_URIS: Record<string, string> = {
   alphaVantage: 'https://www.alphavantage.co/query',
   finnhub: 'https://finnhub.io/api/v1',
-  polygonOptions: 'https://api.polygon.io/v3/snapshot/options/{ticker}',
-  polygonHist: 'https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}',
+  polygonOptions: 'https://api.massive.com/v3/snapshot/options/{ticker}',
+  polygonHist: 'https://api.massive.com/v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}',
   treasuryRfr: 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates',
 };
 

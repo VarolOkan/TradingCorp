@@ -113,8 +113,16 @@ async function resolveEngineBundle(
     rfr,
     expiries,
     iv_history: base.iv_history,
+    // `mock` stays STRICT: false only when the WHOLE bundle (chain + bars) is
+    // live, so downstream analysts that need bars aren't misled.
     mock: !live,
-    source: live ? 'polygon' : 'mock',
+    // The Options TAB shows the option CHAIN — so its headline badge reflects
+    // chain provenance. A live chain reads LIVE even if the historical bars
+    // feed degraded; bars provenance is tracked separately (barsLive) and the
+    // per-domain data-received annotation labels the underlying bars honestly.
+    source: chainLive ? 'polygon' : 'mock',
+    chainLive,
+    barsLive,
   };
 }
 
@@ -152,13 +160,14 @@ export async function optionsIngestionHandler(
     let anyLive = false;
     const profile = profileFromTuning(tuning);
     // Engine acquisition is the gate: if it fetched live Polygon/Treasury, the
-    // raw payloads sit in `acquired.merged` keyed by source field ('results').
+    // raw payloads sit in `acquired.merged` keyed by source id (e.g.
+    // merged.polygonOptions.results, merged.polygonHist.results, merged.treasuryRfr.data).
     const merged: Record<string, any> = acquired?.merged ?? {};
     const srcStatus = acquired?.sourceStatus ?? {};
-    const engineHasChain = (srcStatus['polygonOptions'] === 'ok' || srcStatus['polygonOptions'] === 'fallback') && merged.options_results;
-    const engineHasHist = (srcStatus['polygonHist'] === 'ok' || srcStatus['polygonHist'] === 'fallback') && merged.agg_results;
-    const engineRfr = (srcStatus['treasuryRfr'] === 'ok' || srcStatus['treasuryRfr'] === 'fallback') && Array.isArray(merged.data) && merged.data.length > 0
-      ? numOrRate(merged.data[0])
+    const engineHasChain = (srcStatus['polygonOptions'] === 'ok' || srcStatus['polygonOptions'] === 'fallback') && merged.polygonOptions?.results;
+    const engineHasHist = (srcStatus['polygonHist'] === 'ok' || srcStatus['polygonHist'] === 'fallback') && merged.polygonHist?.results;
+    const engineRfr = (srcStatus['treasuryRfr'] === 'ok' || srcStatus['treasuryRfr'] === 'fallback') && Array.isArray(merged.treasuryRfr?.data) && merged.treasuryRfr.data.length > 0
+      ? numOrRate(merged.treasuryRfr.data[0])
       : undefined;
 
     for (const ticker of state.tickers) {
@@ -172,8 +181,8 @@ export async function optionsIngestionHandler(
       let bundle: LiveOptionsResult;
       if (engineHasChain || engineHasHist || engineRfr !== undefined) {
         const parts: { chainPayload?: any; histPayload?: any; rfr?: number | undefined } = {};
-        if (engineHasChain) parts.chainPayload = merged.options_results;
-        if (engineHasHist) parts.histPayload = merged.agg_results;
+        if (engineHasChain) parts.chainPayload = merged.polygonOptions;
+        if (engineHasHist) parts.histPayload = merged.polygonHist?.results;
         if (engineRfr !== undefined) parts.rfr = engineRfr;
         bundle = await resolveEngineBundle(ticker, profile, parts);
       } else {
@@ -204,14 +213,24 @@ export async function optionsIngestionHandler(
       // Phase R3 (RAW_DATA_DUMP.md): the options ingestion analyst records the
       // raw derivatives slices it collected per ticker, so the export's
       // per-analyst annotation shows the full set of data gathered.
+      // SEMANTIC HONESTY: label each DOMAIN by its OWN provenance. When the
+      // chain is live but the historical bars degraded to mock, the chain/greeks
+      // read 'polygon' while the underlying bars read 'mock' — and the bundle
+      // provenance is 'mixed', never a blanket 'live' over mock bars.
+      const chainSrc = bundle.chainLive ? 'polygon' : 'mock';
+      const barsSrc = bundle.barsLive ? 'polygon' : 'mock';
       const provenance: 'live' | 'mock' | 'mixed' =
-        bundle.source === 'mock' ? 'mock' : bundle.source === 'polygon' || bundle.source === 'yahoo' ? 'live' : 'mixed';
+        bundle.chainLive && bundle.barsLive
+          ? 'live'
+          : !bundle.chainLive && !bundle.barsLive
+            ? 'mock'
+            : 'mixed';
       const underlying = bundle.price_bars.find((s) => s.interval === '1d') ?? bundle.price_bars[0];
       const blocks: Array<{ domain: 'option_chain' | 'greeks' | 'underlying' | 'iv_history'; interval?: string; source: string; rows?: number; barsUsed?: number }> = [];
-      if (bundle.option_chain.length > 0) blocks.push({ domain: 'option_chain', source: bundle.source, rows: bundle.option_chain.length });
-      if (bundle.greeks.length > 0) blocks.push({ domain: 'greeks', source: bundle.source, rows: bundle.greeks.length });
-      if (underlying && underlying.bars.length > 0) blocks.push({ domain: 'underlying', interval: underlying.interval, source: bundle.source, barsUsed: underlying.bars.length });
-      if (bundle.iv_history.length > 0) blocks.push({ domain: 'iv_history', source: bundle.source, rows: bundle.iv_history.length });
+      if (bundle.option_chain.length > 0) blocks.push({ domain: 'option_chain', source: chainSrc, rows: bundle.option_chain.length });
+      if (bundle.greeks.length > 0) blocks.push({ domain: 'greeks', source: chainSrc, rows: bundle.greeks.length });
+      if (underlying && underlying.bars.length > 0) blocks.push({ domain: 'underlying', interval: underlying.interval, source: barsSrc, barsUsed: underlying.bars.length });
+      if (bundle.iv_history.length > 0) blocks.push({ domain: 'iv_history', source: barsSrc, rows: bundle.iv_history.length });
       updatedState = recordDataReceived(updatedState, annotateDataReceived(
         'options_ingestion', ticker, 'optionsData', blocks, provenance,
         `collected option chain (${bundle.option_chain.length} rows) + greeks (${bundle.greeks.length}) + underlying bars + IV history`,

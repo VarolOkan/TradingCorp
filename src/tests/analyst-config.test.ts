@@ -69,6 +69,19 @@ describe('POST /analyst-config (B1 per-source credentials)', () => {
     expect(av?.hasToken).toBe(true);
   });
 
+  it('Treasury RFR (auth:none, no key needed) is excluded from the credentialed catalog so neither dialog shows it', async () => {
+    const res = await request(app).get('/analyst-config');
+    expect(res.status).toBe(200);
+    // Treasury must NOT appear under options_ingestion (nor anywhere).
+    const opt = res.body.analysts.find((a: any) => a.analystId === 'options_ingestion');
+    const allSourceIds = (res.body.analysts as any[]).flatMap((a) => a.sources.map((s: any) => s.id));
+    expect(allSourceIds).not.toContain('treasuryRfr');
+    // Polygon options/aggregates (credentialed) must still be present.
+    expect(opt?.sources.map((s: any) => s.id)).toEqual(
+      expect.arrayContaining(['polygonOptions', 'polygonHist']),
+    );
+  });
+
   it('POST /analyst-config stores a token and echoes a safe summary (no token leak)', async () => {
     const res = await request(app)
       .post('/analyst-config?sessionId=ac-1')
@@ -197,6 +210,37 @@ describe('POST /analyst-config (B1 per-source credentials)', () => {
       expect(res.body.ok).toBe(false);
       expect(res.body.status).toBe(401);
       expect(res.body.error).toMatch(/Authentication failed/i);
+    } finally {
+      (globalThis as any).fetch = realFetch;
+    }
+  });
+
+  it('probes polygonOptions with a ticker-INDEPENDENT reference endpoint on the stored host + Bearer auth', async () => {
+    // Save a Polygon key under the options_ingestion analyst (where the engine
+    // resolves it). Use the default Massive host.
+    await request(app)
+      .post('/analyst-config?sessionId=test-poly')
+      .send({ analystId: 'options_ingestion', sourceId: 'polygonOptions', token: 'poly-live', extra: { uri: 'https://api.massive.com/v3/snapshot/options/{ticker}' } });
+
+    const realFetch = (globalThis as any).fetch;
+    let capturedUrl = '';
+    let capturedAuth = '';
+    (globalThis as any).fetch = async (url: string, init: any) => {
+      capturedUrl = url;
+      capturedAuth = init?.headers?.Authorization ?? '';
+      return { status: 200, ok: true, text: async () => JSON.stringify({ results: [], status: 'OK' }) };
+    };
+    try {
+      const res = await request(app)
+        .post('/analyst-config/test')
+        .send({ analystId: 'options_ingestion', sourceId: 'polygonOptions', sessionId: 'test-poly' });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      // The probe must NOT carry a literal {ticker}, must hit the reference
+      // dividends endpoint, and must target the stored host (api.massive.com).
+      expect(capturedUrl).not.toMatch(/\{ticker\}/);
+      expect(capturedUrl).toMatch(/api\.massive\.com\/v3\/reference\/dividends/);
+      expect(capturedAuth).toBe('Bearer poly-live');
     } finally {
       (globalThis as any).fetch = realFetch;
     }

@@ -495,6 +495,17 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
                     )}
                   </div>
                 </header>
+                {/* SEMANTIC HONESTY: when a Massive/Polygon key WAS configured but
+                    the live option-chain call was rejected (e.g. 401 = plan doesn't
+                    entitle the options endpoint), say so VISIBLY. The badge above
+                    still reads MOCK (we genuinely have no live chain), but this line
+                    tells the truth: the key is fine, the endpoint isn't covered — so
+                    the user doesn't think the key/code is broken. */}
+                {opt.source === 'mock' && opt.note && /a Massive\/Polygon key was configured but the live option-chain call failed/i.test(opt.note) && (
+                  <p className="quote-warn" role="alert" data-testid="options-live-failed" style={{ margin: '8px 0' }}>
+                    {opt.note}
+                  </p>
+                )}
                 {/* Unified options table (WeBull-style): greeks merged per row,
                     two independent CALLS / PUTS toggles (at least one on), strike
                     header shown once (top, between the panes), the two panes scroll

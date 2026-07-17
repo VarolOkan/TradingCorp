@@ -111,6 +111,17 @@ function expandUrl(source: DataSourceSpec, ctx: AcquireContext): string {
   if (ticker) {
     url = url.replace(/\{ticker\}/gi, encodeURIComponent(ticker)).replace(/\{symbol\}/gi, encodeURIComponent(ticker));
   }
+  // Dynamic trailing date window for time-series endpoints (e.g. Polygon v2
+  // aggregates). A HARDCODED range silently goes stale — once "today" passes the
+  // baked-in `to` date the provider can return an empty `results`, which then
+  // reads as a mock/failed source. {from} defaults to ~400 days back, {to} to
+  // today (UTC, YYYY-MM-DD).
+  if (/\{from\}|\{to\}/i.test(url)) {
+    const toDate = new Date();
+    const fromDate = new Date(toDate.getTime() - 400 * 24 * 60 * 60 * 1000);
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    url = url.replace(/\{from\}/gi, iso(fromDate)).replace(/\{to\}/gi, iso(toDate));
+  }
   const sourceId = source.id ?? source.label;
   const token = ctx.resolveToken?.(sourceId) ?? ctx.runtimeConfig?.accessToken ?? '';
   if (source.auth === 'apikey' && token) {

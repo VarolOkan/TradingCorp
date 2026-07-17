@@ -13,6 +13,8 @@ import { makeNodeSurface } from '../registry/logic/shared';
 import { optionsIngestionHandler } from '../registry/logic/options-handlers';
 import { acquireForAnalyst, type AcquireContext, type FetchFn } from '../registry/sources';
 import { ANALYST_DEFS } from '../registry/analysts';
+import { parseTreasuryRfr } from '../registry/logic/hist';
+import { DEFAULT_SOURCE_URIS } from '../registry/analyst-config-schema';
 import type { AgentState } from '../types/financial-analysis';
 
 function baseState(tickers: string[]): AgentState {
@@ -22,8 +24,9 @@ function baseState(tickers: string[]): AgentState {
   };
 }
 
-/** A realistic Polygon v3 options snapshot payload (what the engine projects
- *  into `merged.results`). v3 shape: { ticker, underlying_asset, options: [...] }. */
+/** A realistic Polygon v3 /snapshot/options payload. Massive/Polygon returns
+ *  `{ results: { underlying_asset, options: { calls: [...], puts: [...] } } }`.
+ *  The engine projects `results` into `merged.results`. */
 function polygonSnapshotPayload(ticker: string) {
   const mk = (expiry: string, strike: number, type: 'call' | 'put', iv: number) => ({
     details: { expiration_date: expiry, strike_price: strike, contract_type: type, open_interest: 1200 },
@@ -32,18 +35,21 @@ function polygonSnapshotPayload(ticker: string) {
     last_trade: { price: 3.2, size: 50 },
     underlying_asset: { last_price: 200 },
   });
+  const calls = [
+    mk('2026-08-21', 190, 'call', 0.30),
+    mk('2026-08-21', 200, 'call', 0.28),
+    mk('2026-08-21', 210, 'call', 0.31),
+  ];
+  const puts = [
+    mk('2026-08-21', 190, 'put', 0.33),
+    mk('2026-08-21', 200, 'put', 0.29),
+  ];
   return {
     ticker,
-    underlying_asset: { last_price: 200 },
-    options: [
-      mk('2026-08-21', 190, 'call', 0.30),
-      mk('2026-08-21', 200, 'call', 0.28),
-      mk('2026-08-21', 210, 'call', 0.31),
-      mk('2026-08-21', 190, 'put', 0.33),
-      mk('2026-08-21', 200, 'put', 0.29),
-      mk('2026-09-18', 200, 'call', 0.30),
-      mk('2026-09-18', 200, 'put', 0.30),
-    ],
+    results: {
+      underlying_asset: { last_price: 200 },
+      options: { calls, puts },
+    },
   };
 }
 
@@ -57,7 +63,7 @@ function polygonAggResults() {
 }
 
 /** A Treasury avg_interest_rates data row. */
-const treasuryRow = { security_desc: 'Marketable', avg_interest_rate_amt: 4.32, record_date: '2026-07-01' };
+const treasuryRow = { record_date: '2026-06-30', security_type_desc: 'Marketable', security_desc: 'Total Marketable', avg_interest_rate_amt: 3.411, src_line_nbr: '7' };
 
 /** Build an injected fetch that returns scripted responses keyed by URL host. */
 function engineFetchFn(opts: {
@@ -65,13 +71,15 @@ function engineFetchFn(opts: {
   treasuryOk?: boolean;
 }): FetchFn {
   return async (url) => {
-    if (url.includes('polygon.io')) {
+    // Polygon's REST API is served from api.massive.com; accept either host so
+    // the fixture is host-agnostic (the endpoints moved polygon.io→massive.com).
+    if (url.includes('massive.com') || url.includes('polygon.io')) {
       if (opts.polygonOk) {
-        // Both the options snapshot and the aggregates endpoint share polygon.io.
+        // Both the options snapshot and the aggregates endpoint share the host.
         if (url.includes('/v3/snapshot/options')) {
-          return { status: 200, ok: true, json: async () => ({ options_results: polygonSnapshotPayload('TSLA') }), headers: { get: () => null } };
+          return { status: 200, ok: true, json: async () => (polygonSnapshotPayload('TSLA')), headers: { get: () => null } };
         }
-        return { status: 200, ok: true, json: async () => ({ agg_results: polygonAggResults() }), headers: { get: () => null } };
+        return { status: 200, ok: true, json: async () => ({ results: polygonAggResults() }), headers: { get: () => null } };
       }
       return { status: 401, ok: false, json: async () => ({}), headers: { get: () => null } };
     }
@@ -98,10 +106,10 @@ describe('Phase 1A — §4.9 engine honours fixed options_ingestion specs', () =
     expect(acc.sourceStatus.polygonOptions).toBe('ok');
     expect(acc.sourceStatus.polygonHist).toBe('ok');
     expect(acc.sourceStatus.treasuryRfr).toBe('ok');
-    expect((acc.merged as any).options_results).toBeDefined();
-    expect((acc.merged as any).options_results?.options).toBeDefined();
-    expect(Array.isArray((acc.merged as any).agg_results)).toBe(true);
-    expect(Array.isArray((acc.merged as any).data)).toBe(true);
+    expect((acc.merged as any).polygonOptions?.results).toBeDefined();
+    expect((acc.merged as any).polygonOptions?.results?.options).toBeDefined();
+    expect(Array.isArray((acc.merged as any).polygonHist?.results)).toBe(true);
+    expect(Array.isArray((acc.merged as any).treasuryRfr?.data)).toBe(true);
     expect(acc.degraded).toBe(false);
     expect(acc.usedMockFallback).toBe(false);
   });
@@ -141,21 +149,21 @@ describe('Phase 1A — options_ingestion handler consumes engine-acquired live d
       hardFailed: false,
       authError: false,
       merged: {
-        options_results: polygonSnapshotPayload('TSLA'),
-        agg_results: polygonAggResults(),
-        data: [treasuryRow],
+        polygonOptions: polygonSnapshotPayload('TSLA'),
+        polygonHist: { results: polygonAggResults() },
+        treasuryRfr: { data: [treasuryRow] },
       },
     };
     const out = await optionsIngestionHandler(baseState(['TSLA']), node, tuning as any, acquired as any);
     const bundle = (out as any).optionsData['TSLA'];
     expect(bundle.source).toBe('polygon');
     expect(bundle.mock).toBe(false);
-    // Live chain has 7 contracts; live bars = 3 daily.
-    expect(bundle.option_chain.length).toBe(7);
+    // Live chain has 5 contracts (3 calls + 2 puts); live bars = 3 daily.
+    expect(bundle.option_chain.length).toBe(5);
     expect(bundle.price_bars[0].bars.length).toBe(3);
-    expect(bundle.greeks.length).toBe(7);
-    // Treasury RFR flowed through (4.32% → 0.0432).
-    expect(Math.abs(bundle.rfr - 0.0432)).toBeLessThan(1e-6);
+    expect(bundle.greeks.length).toBe(5);
+    // Treasury RFR flowed through (3.411% → 0.03411).
+    expect(Math.abs(bundle.rfr - 0.03411)).toBeLessThan(1e-6);
     // Underlying anchored on the live spot ($200), not the random band.
     expect(bundle.underlying_price).toBe(200);
   });
@@ -175,5 +183,29 @@ describe('Phase 1A — options_ingestion handler consumes engine-acquired live d
     expect(bundle.source).toBe('mock');
     expect(bundle.mock).toBe(true);
     expect(bundle.option_chain.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Phase 1B — Treasury RFR endpoint contract (no API key required)', () => {
+  it('treasuryRfr default URL filters on security_type_desc=Marketable + security_desc=Total Marketable, sorted newest-first', () => {
+    const url = DEFAULT_SOURCE_URIS.treasuryRfr;
+    expect(url).toContain('security_type_desc:eq:Marketable');
+    expect(url).toContain('security_desc:eq:Total Marketable');
+    expect(url).toContain('sort=-record_date');
+    expect(url).toContain('page[size]=1');
+    // The OLD (broken) filter targeted the wrong column — must not be present.
+    expect(url).not.toContain('security_desc:eq:Marketable');
+  });
+
+  it('parseTreasuryRfr reads the latest Total Marketable row into a 0..1 rate', () => {
+    // Real shape from api.fiscaldata.treasury.gov (no key needed).
+    const row = { record_date: '2026-06-30', security_type_desc: 'Marketable', security_desc: 'Total Marketable', avg_interest_rate_amt: '3.411' };
+    expect(parseTreasuryRfr(row)).toBeCloseTo(0.03411, 5);
+    // When the engine's `merged.data` is empty, options-handlers keeps DEFAULT_RFR
+    // (it only overrides when merged.data.length > 0). parseTreasuryRfr itself
+    // falls back to 0 on an unusable row — harmless because it's never reached
+    // without a populated data array.
+    expect(parseTreasuryRfr({})).toBe(0);
+    expect(parseTreasuryRfr(null)).toBe(0);
   });
 });

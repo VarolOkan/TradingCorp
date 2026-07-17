@@ -109,8 +109,13 @@ export async function acquireForAnalyst(
     if (policy.note) notes.push(policy.note);
     if (res.authError) authError = true;
     if (policy.status === 'ok' || policy.status === 'fallback') {
-      // Merge the acquired data (from primary on ok, or from fallback result).
-      Object.assign(merged, policy.data ?? res.data ?? {});
+      // Key each source's acquired payload under its SOURCE ID so two sources
+      // that both return the same top-level field name (e.g. Polygon's v2
+      // aggregates AND v3 options snapshot both use `results`) don't clobber
+      // each other in `merged`. The per-source payload keeps its own field
+      // shape (e.g. `{ results: [...] }`), so consumers read
+      // `merged[sourceId].results`.
+      merged[source.id ?? source.label] = policy.data ?? res.data ?? {};
     }
     if (policy.escalate) hardFailed = true;
   }

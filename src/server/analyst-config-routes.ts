@@ -181,6 +181,20 @@ export function registerAnalystConfigRoutes(
  * and reports ok/status/error + a clipped detail + latency. The token is sent
  * to the provider but never logged or echoed back.
  */
+/**
+ * Extract the scheme+host origin (e.g. `https://api.massive.com`) from a URL,
+ * so a ticker-independent health probe can target the SAME host the deployment
+ * uses without inheriting the templated path (`/v3/snapshot/options/{ticker}`).
+ * Returns undefined if the input isn't a parseable absolute URL.
+ */
+function originOf(u: string): string | undefined {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function probeSource(opts: {
   source: DataSourceSpec;
   token: string;
@@ -194,11 +208,25 @@ export async function probeSource(opts: {
     finnhub: '/quote?symbol=AAPL',
   };
   const root = (opts.baseUri && opts.baseUri.trim()) || (source.endpoint ?? '');
-  const q = healthQuery[source.id ?? ''] ?? '';
-  const url =
-    source.auth === 'apikey' && token
-      ? `${root}${q.replace('__TOKEN__', encodeURIComponent(token))}`
-      : `${root}${q}`;
+  // Polygon / Massive-compatible sources: probe a ticker-INDEPENDENT reference
+  // endpoint (/v3/reference/dividends) so a VALID key returns 200 regardless of
+  // ticker. The snapshot `endpoint` carries a literal `{ticker}` that would
+  // 404/400 on a raw probe and mask a perfectly good key as "auth failed".
+  // We derive the host ORIGIN from the Base URI (or the source endpoint) so the
+  // probe follows whichever host the deployment targets (api.massive.com by
+  // default) — auth is the Bearer token, which the docs confirm works here.
+  const REFERENCE_HEALTH = new Set(['polygonOptions', 'polygonHist']);
+  let url: string;
+  if (REFERENCE_HEALTH.has(source.id ?? '')) {
+    const origin = originOf(root) ?? root;
+    url = `${origin}/v3/reference/dividends?limit=1`;
+  } else {
+    const q = healthQuery[source.id ?? ''] ?? '';
+    url =
+      source.auth === 'apikey' && token
+        ? `${root}${q.replace('__TOKEN__', encodeURIComponent(token))}`
+        : `${root}${q}`;
+  }
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (source.auth === 'bearer' && token) {

@@ -477,16 +477,20 @@ export async function fetchPriceBars(
  *
  * @returns an `OptionChain` (ticker + underlying + quotes + expiries + rfr).
  */
-export type OptionChainFetchFn = (url: string) => Promise<{
+export type OptionChainFetchFn = (url: string, headers?: Record<string, string>) => Promise<{
   ok: boolean;
   status: number;
   json: () => Promise<any>;
 }>;
 
-function polygonSnapshotUrl(ticker: string, apiKey: string) {
-  return `https://api.polygon.io/v3/snapshot/options/${encodeURIComponent(
+function polygonSnapshotUrl(ticker: string, apiKey?: string) {
+  const base = `https://api.massive.com/v3/snapshot/options/${encodeURIComponent(
     ticker.toUpperCase(),
-  )}?apiKey=${encodeURIComponent(apiKey)}`;
+  )}`;
+  // When a key is supplied, Polygon/Massive accept it as a query param. When
+  // none is supplied (e.g. the caller injected a transport that handles auth
+  // itself) emit the bare URL.
+  return apiKey ? `${base}?apiKey=${encodeURIComponent(apiKey)}` : base;
 }
 
 function numOr(v: any, fallback = 0): number {
@@ -569,13 +573,27 @@ export function parseYahooOptions(ticker: string, payload: any): OptionChainResu
 export function parsePolygonChainResults(payload: any, ticker: string): OptionChainResult | null {
   const sym = String(ticker).trim().toUpperCase();
   // Normalize to the options array regardless of how the caller sliced it.
-  const results: any[] = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.options)
-      ? payload.options
-      : Array.isArray(payload?.results)
-        ? payload.results
-        : [];
+  // Real Polygon v3 /snapshot/options/{ticker} nests under
+  // `results.options.calls` + `results.options.puts`; older/mock shapes use a
+  // flat `options` (or `results`) array. Flatten all of them.
+  let results: any[] = [];
+  if (Array.isArray(payload)) {
+    results = payload;
+  } else if (Array.isArray(payload?.options)) {
+    results = payload.options;
+  } else if (Array.isArray(payload?.results) && Array.isArray(payload.results[0]?.details)) {
+    // results is already a flat contract array.
+    results = payload.results;
+  } else if (payload?.results?.options) {
+    // Real v3 nested shape.
+    const o = payload.results.options;
+    results = [...(o.calls ?? []), ...(o.puts ?? [])];
+    if (payload.underlying_asset == null && payload.results.underlying_asset) {
+      payload = { ...payload, underlying_asset: payload.results.underlying_asset };
+    }
+  } else if (Array.isArray(payload?.results)) {
+    results = payload.results;
+  }
   if (results.length === 0) return null;
   const quotes: OptionQuote[] = [];
   const expirySet = new Set<string>();
@@ -763,12 +781,21 @@ export async function fetchOptionChain(
   const fetchInjected = !!opts.fetchFn;
   const apiKey =
     opts.apiKey ?? (typeof process !== 'undefined' ? process.env?.POLYGON_API_KEY : undefined);
-
+  // Captures WHY a keyed live attempt failed, so the eventual MOCK note can say
+  // "key was set but live call returned 401" instead of a misleading silent mock.
+  let lastLiveError: string | undefined;
   // Live path when: a transport is available AND (a key is set OR the caller
   // explicitly injected a transport — i.e. they handle auth themselves).
   if (typeof doFetch === 'function' && (apiKey || fetchInjected)) {
     try {
-      const res = await doFetch(polygonSnapshotUrl(sym, apiKey));
+      // Use a Bearer header — this matches how the rest of the app (engine +
+      // the Settings [Test] probe) authenticates to api.massive.com, and is the
+      // scheme the user's key is validated against. Sending it as ?apiKey= (the
+      // old behaviour) returns 401 for some Massive endpoints and silently fell
+      // through to MOCK.
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      const res = await doFetch(polygonSnapshotUrl(sym), apiKey ? headers : undefined);
       if (res.ok) {
         const payload = await res.json().catch(() => null);
         const results = payload?.results?.results;
@@ -821,8 +848,17 @@ export async function fetchOptionChain(
             };
           }
         }
+        // Reached here: live response was non-ok OR had no results. Record WHY
+        // so a keyed-but-failing attempt is diagnosable instead of a silent mock.
+        logger.warn(`[options] ${sym}: live Polygon/Massive call returned ${res.status} (ok=${res.ok}) with no usable option chain. Falling back to MOCK.`);
+        lastLiveError = `live call returned HTTP ${res.status}`;
+      } else {
+        logger.warn(`[options] ${sym}: live Polygon/Massive call was not ok (status ${res.status}). Falling back to MOCK.`);
+        lastLiveError = `live call returned HTTP ${res.status}`;
       }
-    } catch {
+    } catch (e) {
+      logger.warn(`[options] ${sym}: live Polygon/Massive call errored: ${e instanceof Error ? e.message : String(e)}. Falling back to MOCK.`);
+      lastLiveError = e instanceof Error ? e.message : String(e);
       /* fall through to mock */
     }
   }
@@ -872,7 +908,9 @@ export async function fetchOptionChain(
     rfr,
     greeks: chainToGreeksRows(mockBundle.option_chain, mockBundle.underlying_price, rfr),
     source: 'mock',
-    note: 'Live option chain unavailable — showing deterministic mock chain.',
+    note: lastLiveError
+      ? `MOCK — a Massive/Polygon key was configured but the live option-chain call failed (${lastLiveError}). See backend [options] logs.`
+      : 'Live option chain unavailable — showing deterministic mock chain.',
   };
 }
 
@@ -888,6 +926,10 @@ export async function fetchOptionChain(
 export interface LiveOptionsResult extends HistoricalBundle {
   /** 'live' when both price bars + chain came from a provider; 'mock' otherwise. */
   source: 'polygon' | 'yahoo' | 'mock';
+  /** True when the option CHAIN was acquired live (drives the Options-tab badge). */
+  chainLive?: boolean;
+  /** True when the historical price BARS were acquired live (tracked separately). */
+  barsLive?: boolean;
 }
 
 function chainToGreeksRows(

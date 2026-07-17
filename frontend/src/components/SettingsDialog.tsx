@@ -28,7 +28,7 @@ import type { AnalystKind } from '../../../src/types/registry';
 import { getServerLog } from '../api/serverLogClient';
 import { getAnalystFlavors, postAnalystFlavors } from '../api/analystFlavorsClient';
 import { getAnalystSourceCatalog, type AnalystSourceCatalogAnalyst } from '../api/analystConfigClient';
-import { buildAnalystConfigSchema } from './analysts/analystConfigSchema';
+import { buildAnalystConfigSchema, type SourceCredField } from './analysts/analystConfigSchema';
 import { SourcesTab, type SourcesTabHandle } from './analysts/SourcesTab';
 
 export interface SettingsDialogProps {
@@ -109,23 +109,54 @@ export function SettingsDialog({
   // ---- Sources tab state (global Data Ingestion source credentials) ----
   // Reuses the SAME shared SourcesTab component the per-analyst dialog uses,
   // so the code is identical and BOTH persist to the GPG vault.
+  // We pull BOTH the `data_ingestion` catalog (Alpha Vantage / Finnhub)
+  // AND the `options_ingestion` catalog (Polygon Options / Aggregates /
+  // Treasury RFR) so the options sources can be configured here too — without
+  // touching the per-analyst dialogs. Polygon sources are tagged with their
+  // own `analystId` ('options_ingestion') so the saved key lands where the
+  // options engine resolves it, while still rendering in this one tab.
   const [sourceCatalog, setSourceCatalog] = useState<AnalystSourceCatalogAnalyst | null>(null);
+  const [sourceCatalogOpt, setSourceCatalogOpt] = useState<AnalystSourceCatalogAnalyst | null>(null);
   const [sourceCatalogError, setSourceCatalogError] = useState<string | null>(null);
   const [vaultDisabled, setVaultDisabled] = useState(false);
   const sourcesRef = useRef<SourcesTabHandle>(null);
   const diSources = useMemo(() => {
     if (!sourceCatalog) return [];
-    return buildAnalystConfigSchema('data_ingestion', 'Data Ingestion', sourceCatalog.sources).sources;
-  }, [sourceCatalog]);
+    const di = buildAnalystConfigSchema('data_ingestion', 'Data Ingestion', sourceCatalog.sources).sources;
+    const optCatalog = sourceCatalogOpt;
+    if (!optCatalog) return di;
+    const opt = buildAnalystConfigSchema('options_ingestion', 'Options Ingestion', optCatalog.sources).sources
+      .map((s) => {
+        const base = { ...s, analystId: 'options_ingestion' as const };
+        // Polygon/Massive options snapshot + daily aggregates share ONE Massive
+        // API key. Collapse them into a single key group so the user enters the
+        // key once; each endpoint is listed beneath the shared token field.
+        if (s.sourceId === 'polygonOptions') {
+          return { ...base, keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Options snapshot' };
+        }
+        if (s.sourceId === 'polygonHist') {
+          return { ...base, keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Daily aggregates' };
+        }
+        return base;
+      });
+    // Merge, de-dup by sourceId (defensive).
+    const byId = new Map<string, SourceCredField>();
+    for (const s of [...di, ...opt]) byId.set(s.sourceId, s);
+    return Array.from(byId.values());
+  }, [sourceCatalog, sourceCatalogOpt]);
 
   // Fetch the catalog as soon as the dialog opens (not lazily on tab switch)
   // so the Sources tab already has its inputs populated when the user opens it.
+  // Pull BOTH analysts' catalogs: data_ingestion (Alpha Vantage /
+  // Finnhub) and options_ingestion (Polygon Options / Aggregates / Treasury
+  // RFR) so the options sources are configurable here too.
   useEffect(() => {
     if (!open) return;
     setSourceCatalogError(null);
     getAnalystSourceCatalog()
       .then((cat) => {
         setSourceCatalog(cat.analysts.find((a) => a.analystId === 'data_ingestion') ?? null);
+        setSourceCatalogOpt(cat.analysts.find((a) => a.analystId === 'options_ingestion') ?? null);
         setVaultDisabled(cat.vaultDisabled === true);
       })
       .catch((err) => setSourceCatalogError(err instanceof Error ? err.message : String(err)));
