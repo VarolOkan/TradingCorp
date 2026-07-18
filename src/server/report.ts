@@ -117,15 +117,51 @@ export function buildReportModel(result: any, meta: ReportMeta = {}): ReportMode
 
   const decisions: Record<string, any> = r.decisions ?? {};
   const riskAssessments: Record<string, any> = r.riskAssessments ?? {};
+  const thesisSummary: any = r.thesisSummary ?? null;
+
+  // The backend does NOT always emit per-ticker `decisions` / `riskAssessments`
+  // (e.g. the live run returned both as empty `{}`). It DOES emit per-analyst
+  // data in `analystTraces` (each with `inputs[].ticker` + `output.verdict/score`)
+  // and a per-run `thesisSummary`. Derive per-ticker rows from those so the
+  // Per-Ticker Decisions / Risk Register tables are populated instead of "—".
+  const allTraces: any[] = Array.isArray(r.analystTraces) ? r.analystTraces : [];
+
+  const traceCovers = (trace: any, ticker: string): boolean => {
+    const inputs = Array.isArray(trace?.inputs) ? trace.inputs : [];
+    if (inputs.length === 0) return true; // global analyst (covers the whole universe)
+    const tk = ticker.toUpperCase();
+    return inputs.some((i: any) => {
+      const raw = i?.ticker ?? i?.symbol ?? '';
+      return String(raw).toUpperCase().split(/[,\s]+/).includes(tk);
+    });
+  };
+  const traceVerdictFor = (analystId: string, ticker: string): { verdict: any; score: any } | null => {
+    const t = allTraces.find((tr) => tr?.analyst === analystId && traceCovers(tr, ticker));
+    if (!t) return null;
+    const out = t.output ?? {};
+    return { verdict: out.verdict ?? null, score: typeof out.score === 'number' ? out.score : null };
+  };
 
   const perTicker: PerTickerDecision[] = tickers.map((t) => {
     const d = decisions[t] ?? {};
     const ra = riskAssessments[t] ?? {};
+    const gov = traceVerdictFor('governance', t);
+    const fund = traceVerdictFor('fundamental', t);
+    const riskTr = traceVerdictFor('risk', t);
+    const decision =
+      d.decision ?? gov?.verdict ?? thesisSummary?.decision ?? fund?.verdict ?? null;
+    const confidence =
+      typeof d.confidence === 'number'
+        ? d.confidence
+        : typeof thesisSummary?.confidence === 'number'
+          ? thesisSummary.confidence
+          : (gov?.score ?? fund?.score ?? null);
+    const riskLevel = ra.risk_level ?? d.risk_level ?? riskTr?.verdict ?? null;
     return {
       ticker: t,
-      decision: d.decision ?? null,
-      confidence: typeof d.confidence === 'number' ? d.confidence : null,
-      riskLevel: ra.risk_level ?? d.risk_level ?? null,
+      decision: decision ?? null,
+      confidence: typeof confidence === 'number' ? confidence : null,
+      riskLevel: riskLevel ?? null,
     };
   });
 
@@ -134,8 +170,7 @@ export function buildReportModel(result: any, meta: ReportMeta = {}): ReportMode
   // verdicts. Exclude them so the report's Analyst Deep-Dives section only
   // shows the actual analysis analysts (and the governance gatekeeper).
   const NON_DEEP_DIVE_IDS = new Set(['orchestrator', 'data_ingestion', 'options_ingestion']);
-  const traces: any[] = (Array.isArray(r.analystTraces) ? r.analystTraces : [])
-    .filter((t: any) => t && !NON_DEEP_DIVE_IDS.has(t.analyst));
+  const traces: any[] = allTraces.filter((t: any) => t && !NON_DEEP_DIVE_IDS.has(t.analyst));
   const analysts: AnalystSlide[] = traces.map((t: any) => {
     const out = t?.output ?? {};
     const llm = t?.llm ?? null;
@@ -159,11 +194,16 @@ export function buildReportModel(result: any, meta: ReportMeta = {}): ReportMode
   const risks: RiskRow[] = tickers.map((t) => {
     const d = decisions[t] ?? {};
     const ra = riskAssessments[t] ?? {};
+    const riskTr = traceVerdictFor('risk', t);
     return {
       ticker: t,
-      riskLevel: ra.risk_level ?? null,
-      rationale: d.preservation_rationale ?? null,
-      conditions: Array.isArray(d.conditions) ? d.conditions : [],
+      riskLevel: ra.risk_level ?? d.risk_level ?? riskTr?.verdict ?? null,
+      rationale: d.preservation_rationale ?? r.preservation_rationale ?? thesisSummary?.reasoning ?? null,
+      conditions: Array.isArray(d.conditions)
+        ? d.conditions
+        : Array.isArray(r.conditions)
+          ? r.conditions
+          : [],
     };
   });
 

@@ -313,6 +313,64 @@ describe('report routes (persistence + download)', () => {
     expect(list.body.byDay[day] ?? []).not.toContainEqual(expect.objectContaining({ id }));
   });
 
+  it('populates per-ticker rows when decisions/riskAssessments are empty (live payload)', () => {
+    // Regression: the live backend returns decisions:{} and riskAssessments:{}
+    // but DOES populate analystTraces (with per-ticker inputs) and thesisSummary.
+    // The Per-Ticker Decisions / Risk Register tables must be derived from those,
+    // not left as "—".
+    const m = buildReportModel(
+      {
+        tickers: ['TSLA', 'NVDA'],
+        decision: 'REJECT',
+        confidence: 85,
+        thesisSummary: {
+          decision: 'REJECT',
+          confidence: 85,
+          reasoning: 'Does not meet preservation-first criteria',
+          rows: [
+            { analyst: 'fundamental', name: 'Fundamental Analyst', verdict: 'BEARISH', score: 62 },
+            { analyst: 'technical', name: 'Technical Analyst', verdict: 'BULLISH', score: 71 },
+            { analyst: 'sentiment', name: 'Sentiment Analyst', verdict: 'NEUTRAL', score: 48 },
+            { analyst: 'risk', name: 'Risk Analyst', verdict: 'BEARISH', score: 40 },
+          ],
+        },
+        // decisions / riskAssessments intentionally absent (empty in live run)
+        analystTraces: [
+          {
+            analyst: 'orchestrator',
+            inputs: [{ ticker: 'TSLA, NVDA', label: 'universe' }],
+            output: {},
+          },
+          {
+            analyst: 'fundamental',
+            inputs: [{ ticker: 'TSLA, NVDA' }],
+            output: { score: 62, verdict: 'BEARISH', summary: 'Weak liquidity.' },
+          },
+          {
+            analyst: 'risk',
+            inputs: [{ ticker: 'TSLA, NVDA' }],
+            output: { score: 40, verdict: 'BEARISH', summary: 'Tail risk.' },
+          },
+        ],
+      },
+      { agencyId: 'long-term', tickers: ['TSLA', 'NVDA'], companyName: 'Universe' },
+    );
+    expect(m.perTicker).toHaveLength(2);
+    for (const t of m.perTicker) {
+      expect(t.decision).not.toBeNull();
+      expect(t.confidence).not.toBeNull();
+      expect(t.riskLevel).not.toBeNull();
+    }
+    // Decision falls back to the run-level thesisSummary decision (REJECT).
+    expect(m.perTicker[0].decision).toBe('REJECT');
+    expect(m.perTicker[0].confidence).toBe(85);
+    // Risk derived from the risk analyst's verdict that covered this ticker.
+    expect(m.perTicker[0].riskLevel).toBe('BEARISH');
+    const md = renderMarkdown(m);
+    // No "—" placeholders in the populated per-ticker table.
+    expect(md).not.toMatch(/\| TSLA \| — \| — \| — \|/);
+  });
+
   it('excludes orchestrator/ingestion traces from Analyst Deep-Dives', () => {
     const m = buildReportModel(
       {

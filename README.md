@@ -93,6 +93,14 @@ relevant subgraph for a task instead of grepping/dumping whole files.
   the whole corpus — a ~2500× saving on that task.
 - Full convention + caveats: [`AGENT.md` §10](../AGENT.md).
 
+## Demo
+
+<p align="center">
+  <img src="screenshots/demo.gif" alt="TradingCorp demo" width="800"/>
+</p>
+
+*Watch the Options Agency screen a watchlist, run an analyst-driven screener, and surface each analyst's work and generated results — all from the dashboard.*
+
 ## Screenshots
 
 ![Options Agency screener](screenshots/DateSelector.jpg)
