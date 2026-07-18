@@ -29,7 +29,7 @@ const getQuoteMock = vi.fn(async (s: string) => {
 vi.mock('../api/quoteClient', () => ({ getQuote: (...a: any[]) => getQuoteMock(...a) }));
 
 // Screener's "Run" calls getScreener. Mock a single promising ticker so the
-// "→ Analyze" button is rendered and exercisable.
+// "→ Add" button is rendered and exercisable.
 vi.mock('../api/screenerClient', () => ({
   getScreener: vi.fn(async () => ({
     agencyId: 'long-term',
@@ -242,9 +242,9 @@ describe('AnalysisView — agency-switch unsaved-results guard', () => {
   });
 });
 
-// --- Screener "→ Analyze" fills input, runs, AND collapses the panel ---
-describe('AnalysisView — screener "→ Analyze" fills input, runs, collapses', () => {
-  it('places the ticker in the field, starts the run, and collapses the panel', async () => {
+// --- Screener "→ Add" fills the Ticker symbols input (pill) and stays open (no auto-run) ---
+describe('AnalysisView — screener "→ Add" adds to Ticker symbols, stays open', () => {
+  it('places the ticker in the field as a pill, does NOT auto-run, and keeps the panel open', async () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
     const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
     expect(input.value).toBe('');
@@ -255,26 +255,26 @@ describe('AnalysisView — screener "→ Analyze" fills input, runs, collapses',
 
     // Results table appears.
     await waitFor(() => expect(screen.getByTestId('screener-table')).toBeTruthy());
-    const analyzeBtn = screen.getByTestId('screener-analyze-AAPL');
+    const addBtn = screen.getByTestId('screener-add-AAPL');
 
-    // Click "→ Analyze" — should fill input, start run, AND collapse panel.
-    fireEvent.click(analyzeBtn);
+    // Click "→ Add" — should fill the input (as a pill) but must NOT start an
+    // analysis run, and the panel must stay open so more tickers can be added.
+    fireEvent.click(addBtn);
 
-    // 1) Input is populated.
-    expect(input.value).toBe('AAPL');
-    // 2) The analysis run started.
-    expect(screen.getByText('Analyzing…')).toBeTruthy();
-    // 3) The screener is now collapsed: the toggle AND the body report
-    //    aria-expanded="false" (the body stays mounted but is hidden/animated).
-    expect(screen.getByTestId('screener-toggle').getAttribute('aria-expanded')).toBe('false');
+    // 1) Input is populated (as a pill).
+    expect(screen.getByTestId('pill-AAPL')).toBeInTheDocument();
+    // 2) The analysis run did NOT start.
+    expect(screen.queryByText('Analyzing…')).toBeNull();
+    // 3) The screener is still open (toggle + body aria-expanded="true").
+    expect(screen.getByTestId('screener-toggle').getAttribute('aria-expanded')).toBe('true');
     const body = document.querySelector('.screener-body') as HTMLElement;
-    expect(body.getAttribute('aria-expanded')).toBe('false');
+    expect(body.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('fills the ticker input even when the socket is disconnected (regression)', async () => {
+  it('adds the ticker to the input even when the socket is disconnected (regression)', async () => {
     // A socket whose emit throws (simulates the backend being down / on the
-    // wrong port). Before the fix this threw before setSymbolInput committed,
-    // so the field stayed empty.
+    // wrong port). The "→ Add" action must still land the ticker as a pill
+    // regardless of socket state (it never emits — only adds to the input).
     const throwingSocket = {
       on: vi.fn(),
       off: vi.fn(),
@@ -289,10 +289,10 @@ describe('AnalysisView — screener "→ Analyze" fills input, runs, collapses',
     fireEvent.click(screen.getByTestId('screener-run'));
     await waitFor(() => expect(screen.getByTestId('screener-table')).toBeTruthy());
 
-    fireEvent.click(screen.getByTestId('screener-analyze-AAPL'));
+    fireEvent.click(screen.getByTestId('screener-add-AAPL'));
 
-    // The ticker MUST land in the input regardless of the socket state.
-    expect(input.value).toBe('AAPL');
+    // The ticker MUST land in the input (as a pill) regardless of the socket state.
+    expect(screen.getByTestId('pill-AAPL')).toBeInTheDocument();
   });
 
   it('clicking a watchlist chip drops the ticker into the input box but does NOT auto-run', async () => {
@@ -305,8 +305,8 @@ describe('AnalysisView — screener "→ Analyze" fills input, runs, collapses',
     fireEvent.click(screen.getByTestId('watchlist-add-btn'));
     fireEvent.click(screen.getByTestId('watchlist-open-TSLA'));
 
-    // The chip click seeds the Ticker symbols field with the symbol...
-    expect(input.value).toBe('TSLA');
+    // The chip click seeds the Ticker symbols field with the symbol (as a pill)...
+    expect(screen.getByTestId('pill-TSLA')).toBeInTheDocument();
     // ...but it must NOT start an analysis. The user reviews/edits and then
     // clicks [Analyze] themselves. So "Analyzing…" must NOT appear.
     expect(screen.queryByText('Analyzing…')).toBeNull();
@@ -332,8 +332,8 @@ describe('AnalysisView — no-run chart preview', () => {
 
     // The chart card appears immediately...
     await waitFor(() => expect(screen.getByTestId('market-card-NVDA')).toBeTruthy());
-    // ...the field is filled...
-    expect(input.value).toBe('NVDA');
+    // ...the field is filled (as a pill)...
+    expect(screen.getByTestId('pill-NVDA')).toBeInTheDocument();
     // ...but the agency run did NOT start (no "Analyzing…").
     expect(screen.queryByText('Analyzing…')).toBeNull();
   });
@@ -366,12 +366,14 @@ describe('AnalysisView — no-run chart preview', () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
     const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
 
-    // Preview first via blur.
+    // Preview first via blur (preview only — does NOT auto-add a pill).
     fireEvent.change(input, { target: { value: 'AAPL' } });
     fireEvent.blur(input);
     await waitFor(() => expect(screen.getByTestId('market-card-AAPL')).toBeTruthy());
 
-    // Now run — the agency work starts.
+    // Commit the ticker as a pill (explicit Enter), then run — the agency work starts.
+    fireEvent.change(input, { target: { value: 'AAPL' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
     fireEvent.click(screen.getByText('Analyze'));
     expect(screen.getByText('Analyzing…')).toBeTruthy();
     // The card persists (now driven by the run's tickers, not the preview) — and

@@ -2,15 +2,15 @@
 // Phase 6: Stock Screener UI. A collapsible panel with a "Run screener" button
 // that calls GET /screener for the currently selected agency and shows the
 // top-N most promising tickers (promise score + per-axis breakdown + verdict),
-// plus how long the screen took. Each row has a "→ Analyze" button that sends
-// the ticker straight into the analysis tool.
+// plus how long the screen took. Each row has a "→ Add" button that drops the
+// ticker into the Ticker symbols input (as a pill) for the user to analyze later.
 import { useState, useRef, useEffect } from 'react';
 import { getScreener, type ScreenerResult, type ScreenerRow, type UniverseTrace } from '../api/screenerClient';
 import { agencyById, resolveScreenerProfile, resolveAssetClass } from './analysts/agencies';
 
 export interface ScreenerPanelProps {
   agencyId: string;
-  /** Called when the user picks a ticker to analyze. */
+  /** Called when the user picks a ticker to add to the Ticker symbols input. */
   onPick: (ticker: string) => void;
   limit?: number;
   /** Controlled open state. When provided, the parent owns expand/collapse. */
@@ -389,11 +389,11 @@ export function ScreenerPanel({ agencyId, onPick, limit = 15, open: openProp, on
                       <td>
                         <button
                           type="button"
-                          className="screener-analyze"
-                          data-testid={`screener-analyze-${r.ticker}`}
+                          className="screener-add"
+                          data-testid={`screener-add-${r.ticker}`}
                           onClick={() => onPick(r.ticker)}
                         >
-                          → Analyze
+                          → Add
                         </button>
                       </td>
                     </tr>

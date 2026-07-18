@@ -77,10 +77,20 @@ export function AnalysisView({
   // Bumped after a re-org or agency CRUD save so the wall + dropdown re-render
   // immediately from the mutated AGENCIES mirror (no "next run" deferral).
   const [registryVersion, setRegistryVersion] = useState(0);
-  // Symbol text for the "Ticker symbols" input. Lifted here so the Screener's
-  // "→ Analyze" (and other surfaces) can drop a ticker into the field without
+  // Symbol pills for the "Ticker symbols" input. Lifted here so the Screener's
+  // "→ Add" (and other surfaces) can drop a ticker into the field without
   // auto-submitting — the user reviews/edits it, then hits Analyze themselves.
-  const [symbolInput, setSymbolInput] = useState('');
+  const [symbolPills, setSymbolPills] = useState<string[]>([]);
+  // Append a ticker to the pill list (dedupe + hard cap at 6). Used by the
+  // Watchlist chip + Screener "→ Add" so those surfaces ADD rather than replace.
+  const addSymbol = (s: string) => {
+    const sym = s.trim().toUpperCase();
+    if (!sym) return;
+    setSymbolPills((prev) => {
+      if (prev.includes(sym) || prev.length >= 6) return prev;
+      return [...prev, sym];
+    });
+  };
   // Phase 7.5: a "preview" ticker set that fills the Chart/Quote/Options card
   // IMMEDIATELY on (a) a Watchlist chip click or (b) leaving the Ticker symbols
   // input — WITHOUT triggering the agency run. [Analyze] is still the only thing
@@ -115,7 +125,7 @@ export function AnalysisView({
       setPreviewChecking(false);
     }
   };
-  // Screener expand/collapse state, lifted so "→ Analyze" can collapse the
+  // Screener expand/collapse state, lifted so "→ Add" can collapse the
   // panel (after filling the input + starting the run).
   const [screenerOpen, setScreenerOpen] = useState(false);
   // "Agencies Analysts" collapsible wrapper around the Analyst Wall cards.
@@ -126,6 +136,9 @@ export function AnalysisView({
   const [relationsOpen, setRelationsOpen] = useState(true);
   // Top collapsible grouping the Watchlist + Ticker symbols + Stock Screener.
   const [topSectionOpen, setTopSectionOpen] = useState(true);
+  // Ticker symbols (pill input) is its own top-level section, separate from the
+  // Watchlist & Screeners collapsible.
+  const [tickerSectionOpen, setTickerSectionOpen] = useState(true);
   // Agency switching is guarded by requestAgency/commitAgency (defined below
   // handleSubmit, once resetWall + resetAnalysis are in scope).
   const agencyAnalysts: AnalystMeta[] = agencyById(agencyId).analysts
@@ -296,10 +309,11 @@ export function AnalysisView({
           home. Lands above the form so returning users see their saved
           symbols first; clicking a chip deep-dives via the analysis tool. */}
 
-      {/* Top collapsible: Watchlist + Ticker symbols + Stock Screener, grouped
-          for a compact default view. Frame + header stay visible when collapsed
-          (only the inner content animates). Sits just below the agency selector
-          so the agency remains the first analysis control. */}
+      {/* Top collapsible: Watchlist + Stock Screener, grouped for a compact
+          default view. Frame + header stay visible when collapsed (only the
+          inner content animates). Sits just below the agency selector so the
+          agency remains the first analysis control. The Ticker symbols input
+          is a SEPARATE top-level section below. */}
       <div className="top-section" data-testid="top-section">
         <button
           type="button"
@@ -317,31 +331,51 @@ export function AnalysisView({
               // input box AND immediately previews the Chart/Quote/Options card —
               // the agents' work still waits for [Analyze]. The chart appears once
               // the symbol is validated; if it isn't found, nothing shows.
-              onOpen={async (s) => { setSymbolInput(s); setPreviewTickers(await resolvePreview(s)); }}
-              onAnalyze={async (s) => { setSymbolInput(s); setPreviewTickers(await resolvePreview(s)); }}
+              onOpen={async (s) => { addSymbol(s); const r = await resolvePreview(s); setPreviewTickers((prev) => [...new Set([...prev, ...r])]); }}
+              onAnalyze={async (s) => { addSymbol(s); const r = await resolvePreview(s); setPreviewTickers((prev) => [...new Set([...prev, ...r])]); }}
             />
 
+            {/* Phase 6: Stock Screener — find the most promising tickers for the
+                selected agency. Sits directly below the Watchlist. The row "→ Add"
+                action drops the ticker into the Ticker symbols input (as a pill)
+                so the user can include it in their next [Analyze] run — it does NOT
+                auto-run, and the panel stays open so more tickers can be added. */}
+            <ScreenerPanel
+              agencyId={agencyId}
+              open={screenerOpen}
+              onOpenChange={setScreenerOpen}
+              onPick={(t) => { addSymbol(t); }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Ticker symbols (pill input) — its own top-level section, separate from
+          Watchlist & Screeners. Collapsible so the user can hide the input once
+          they've entered their tickers. */}
+      <div className="ticker-section" data-testid="ticker-section">
+        <button
+          type="button"
+          className="collapsible-section-toggle"
+          aria-expanded={tickerSectionOpen}
+          data-testid="ticker-section-toggle"
+          onClick={() => setTickerSectionOpen((v) => !v)}
+        >
+          {tickerSectionOpen ? '▾' : '▸'} Ticker symbols
+        </button>
+        <div className="collapsible" aria-expanded={tickerSectionOpen}>
+          <div className="collapsible-inner">
             <AnalysisForm
               onSubmit={handleSubmit}
               running={running}
               sessionId={sessionId}
               onSessionChange={onSessionChange}
-              value={symbolInput}
-              onChange={setSymbolInput}
+              symbols={symbolPills}
+              onSymbolsChange={setSymbolPills}
               // Leaving the Ticker symbols field previews the chart for whatever
               // was typed (validated first; not-found → nothing shown). This is a
               // convenience preview only — [Analyze] still starts the agency run.
               onBlur={async (v) => { setPreviewTickers(await resolvePreview(v)); }}
-            />
-
-            {/* Phase 6: Stock Screener — find the most promising tickers for the
-                selected agency. "→ Analyze" drops the ticker into the Ticker symbols
-                field above, kicks off the analysis run, AND collapses the panel. */}
-            <ScreenerPanel
-              agencyId={agencyId}
-              open={screenerOpen}
-              onOpenChange={setScreenerOpen}
-              onPick={(t) => { setScreenerOpen(false); handleSubmit([t]); setSymbolInput(t); }}
             />
           </div>
         </div>
@@ -352,40 +386,56 @@ export function AnalysisView({
           panels. The card also previews immediately on a Watchlist chip click or
           leaving the Ticker symbols field (previewTickers) — that path does NOT
           start the agency run; only [Analyze] populates wallTickers. */}
-      {(wallTickers.length > 0 || previewTickers.length > 0) && (
-        <div className="market-row-wrap">
-          {wallTickers.length > 0 && (
-            <div className="compare-toggle-row" data-testid="compare-toggle-row">
-              <button
-                type="button"
-                className={`compare-toggle ${compareMode ? 'active' : ''}`}
-                aria-pressed={compareMode}
-                data-testid="compare-toggle"
-                onClick={() => setCompareMode((v) => !v)}
-              >
-                {compareMode ? 'Exit compare' : 'Compare tickers'}
-              </button>
-              <span className="compare-hint">Comparing {wallTickers.length} tickers</span>
-            </div>
-          )}
-          {compareMode && wallTickers.length >= 2 && wallTickers.length <= 5 ? (
-            <CompareView tickers={wallTickers} result={result} />
-          ) : (
-            <div className="market-row" data-testid="market-row">
-              {/* Prefer the run's tickers so a just-submitted [Analyze] instantly
-                  replaces the preview; otherwise show the previewed tickers. */}
-              {(wallTickers.length > 0 ? wallTickers : previewTickers).map((t) => (
-                <MarketDataCard
-                  key={t}
-                  symbol={t}
-                  agencyId={agencyId}
-                  technical={result?.technical_analysis?.[t] ?? null}
-                  sentiment={result?.sentiment_analysis?.[t] ?? null}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Compare affordance is driven by the ENTERED pills so it is available
+          as soon as 2+ tickers are typed — independent of any analysis run. */}
+      {symbolPills.length >= 1 && (
+        symbolPills.length >= 2 && symbolPills.length <= 6 ? (
+          <div className="compare-toggle-row" data-testid="compare-toggle-row">
+            <button
+              type="button"
+              className={`compare-toggle ${compareMode ? 'active' : ''}`}
+              aria-pressed={compareMode}
+              data-testid="compare-toggle"
+              onClick={() => setCompareMode((v) => !v)}
+            >
+              {compareMode ? 'Exit compare' : 'Compare tickers'}
+            </button>
+            <span className="compare-hint">Comparing {symbolPills.length} tickers</span>
+          </div>
+        ) : (
+          <span className="compare-hint" data-testid="compare-hint-guide">
+            Enter 2–6 tickers as pills in “Ticker symbols” to compare them.
+          </span>
+        )
+      )}
+
+      {/* Main area: CompareView when comparing, otherwise the per-ticker cards
+          (from the last run / preview). When there's no run yet, show the
+          entered pill collection UNIONed with any previewed symbols so the
+          graphs reflect everything the user has defined — not just the last
+          one clicked. */}
+      {compareMode && symbolPills.length >= 2 && symbolPills.length <= 6 ? (
+        <CompareView tickers={symbolPills} result={result} />
+      ) : (
+        (wallTickers.length > 0 || symbolPills.length > 0 || previewTickers.length > 0) && (
+          <div className="market-row" data-testid="market-row">
+            {/* Prefer the run's tickers so a just-submitted [Analyze] instantly
+                replaces the preview; otherwise show the collection: entered
+                pills UNION previewed symbols (deduped, pills first). */}
+            {(wallTickers.length > 0
+              ? wallTickers
+              : [...new Set([...symbolPills, ...previewTickers])]
+            ).map((t) => (
+              <MarketDataCard
+                key={t}
+                symbol={t}
+                agencyId={agencyId}
+                technical={result?.technical_analysis?.[t] ?? null}
+                sentiment={result?.sentiment_analysis?.[t] ?? null}
+              />
+            ))}
+          </div>
+        )
       )}
 
       {!connected && (

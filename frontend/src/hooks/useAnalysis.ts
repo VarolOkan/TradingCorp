@@ -90,7 +90,7 @@ export function useAnalysis(socket: Socket | null): UseAnalysis {
       } catch (e: any) {
         // A disconnected socket can throw synchronously on emit. Surface a
         // clear error instead of letting the throw abort the caller's state
-        // update (e.g. the Screener "→ Analyze" ticker fill).
+        // update (e.g. the Screener "→ Add" ticker fill).
         setRunning(false);
         setError(e?.message || 'Failed to send analysis request (not connected)');
       }

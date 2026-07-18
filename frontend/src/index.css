@@ -111,7 +111,7 @@ body {
   background: #0f172a;
   color: #f8fafc;
 }
-.analysis-form button {
+.analyze-btn {
   padding: 0.55rem 1.1rem;
   border: none;
   border-radius: 6px;
@@ -120,9 +120,33 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
-.analysis-form button:disabled {
+.analyze-btn:disabled {
   background: #94a3b8;
   cursor: default;
+}
+.symbol-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 6px;
+  background: #0f172a;
+  min-height: 2.4rem;
+}
+.symbol-pills input {
+  margin-top: 0;
+  border: none;
+  background: transparent;
+  color: #f8fafc;
+  flex: 1 1 8rem;
+  min-width: 8rem;
+  padding: 0.3rem;
+}
+.symbol-pills input:disabled {
+  color: #64748b;
 }
 .connect-hint,
 .analyzing {
@@ -3488,7 +3512,8 @@ body {
 .screener-verdict-strong { color: #34d399; }
 .screener-verdict-watch { color: #fbbf24; }
 .screener-verdict-weak { color: #f87171; }
-.screener-analyze { padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.12); color: #7dd3fc; cursor: pointer; font-size: 0.7rem; }
+.screener-add { display: inline-flex; align-items: center; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 999px; color: #7dd3fc; font-weight: 700; font-size: 0.78rem; padding: 0.25rem 0.6rem; cursor: pointer; }
+.screener-add:hover { background: rgba(56, 189, 248, 0.18); }
 
 /* Sortable column headers (click to toggle ASC/DESC). */
 .screener-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
