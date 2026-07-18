@@ -9,7 +9,8 @@ import type { AgentState, HistoricalBundle } from '../../types/financial-analysi
 import type { AnalystTuning } from '../../types/registry';
 import type { NodeSurface } from './shared';
 import { annotateDataReceived, recordDataReceived } from './shared';
-import { fetchHistoricalBundle, resolveLiveOptionsBundle, type HistProfile } from './hist';
+import { fetchHistoricalBundle, type HistProfile } from './hist';
+import { resolveLiveOptionsBundle } from '../sources/adapters/option-chain';
 
 /**
  * Build the hist.ts profile for a ticker from the agency tuning. The two option

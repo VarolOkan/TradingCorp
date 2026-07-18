@@ -15,10 +15,12 @@
 import type { DataDomain, DomainRecords, ResolveDomainCtx } from '../types/domains';
 import { mkRecord } from '../types/domains';
 import type { DataSourceSpec } from '../../types/registry';
-import { fetchPriceBars, fetchOptionChain, parseTreasuryRfr } from './hist';
+import { acquirePriceBars } from '../sources/adapters/price-bars';
+import { acquireOptionChain } from '../sources/adapters/option-chain';
 import { fetchCompanyNews } from './news';
 import { fetchRealFinancialData } from './data-ingestion';
 import { acquireSource } from '../sources/acquire';
+import { parseTreasuryRfr } from './hist';
 import { DEFAULT_SOURCE_URIS } from '../analyst-config-schema';
 import { domainSourceConfigStore } from '../../server/domain-source-config';
 
@@ -88,7 +90,7 @@ export async function resolveDomain<D extends DataDomain>(
 
   switch (domain) {
     case 'price_bars': {
-      const r = await fetchPriceBars(sym, {
+      const r = await acquirePriceBars(sym, {
         interval: ctx.profile?.intervals?.[0] ?? '1d',
         lookbackDays: ctx.profile?.lookbackDays ?? 90,
         fetchFn: doFetch as any,
@@ -98,7 +100,7 @@ export async function resolveDomain<D extends DataDomain>(
     }
 
     case 'option_chain': {
-      const r = await fetchOptionChain(sym, {
+      const r = await acquireOptionChain(sym, {
         fetchFn: doFetch as any,
         ...(ctx.apiKey ? { apiKey: ctx.apiKey } : {}),
       });
@@ -183,7 +185,7 @@ export async function resolveDomain<D extends DataDomain>(
       // P0: derived from price_bars (realized vol + last close). mkt cap not
       // available without fundamentals; left undefined. P2 may add a dedicated
       // source. Kept honest: confidence reflects the backing price_bars source.
-      const r = await fetchPriceBars(sym, {
+      const r = await acquirePriceBars(sym, {
         interval: ctx.profile?.intervals?.[0] ?? '1d',
         lookbackDays: ctx.profile?.lookbackDays ?? 90,
         fetchFn: doFetch as any,

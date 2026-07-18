@@ -1,7 +1,7 @@
 // src/tests/live-bundle.test.ts
 // Phase I (options ingestion wiring): resolveLiveOptionsBundle upgrades the
 // mock bundle to live when a provider key is present, parity-safe otherwise.
-import { resolveLiveOptionsBundle } from '../registry/logic/hist';
+import { resolveLiveOptionsBundle } from '../registry/sources/adapters/option-chain';
 
 describe('resolveLiveOptionsBundle (Phase I gateway)', () => {
   it('returns a mock bundle (no key) that is structurally identical to the base mock', async () => {

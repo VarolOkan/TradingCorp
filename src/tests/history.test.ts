@@ -1,7 +1,7 @@
 // src/tests/history.test.ts
 // Phase I (historical quotes): real OHLCV bars from Yahoo, mock fallback.
 import { registerHistoryRoutes } from '../server/history-routes';
-import { fetchPriceBars } from '../registry/logic/hist';
+import { acquirePriceBars as fetchPriceBars } from '../registry/sources/adapters/price-bars';
 import express from 'express';
 import type { Server } from 'http';
 import request from 'supertest';

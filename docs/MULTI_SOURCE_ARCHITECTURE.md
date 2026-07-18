@@ -1,6 +1,6 @@
 # Multi-Source Data Architecture (vendor-agnostic fan-in)
 
-Status: DESIGN / not yet scheduled.  Scope: decouple every analyst from a
+Status: P0–P3 SHIPPED + tested; P4 PARTIAL (call-site consolidation done, legacy-fetcher deletion BLOCKED on missing option_chain/fundamentals adapters); P5–P6 pending.
 hard-coded provider, let each data *domain* be served by one-or-many pluggable
 sources in different layouts, and let an analyst **weigh all candidate sources**
 instead of trusting a single one. Goal: kill vendor lock-in and widen the
@@ -341,13 +341,56 @@ providers.
   was NOT exercised in a browser here. The store→resolveDomain wiring is unit-
   proven; deploy + manual UI verify still required (see P3b deploy note).
 
-### P4 — Delete legacy hard-wired functions
-- Remove `fetchPriceBars`/`fetchOptionChain`/inline AlphaVantage/inline Finnhub
-  calls; everything now flows through `resolveDomain` → adapters → `acquireSource`.
+### P4 — Consolidate call sites onto `resolveDomain` (PARTIAL — deletion BLOCKED)
+**Goal:** every external consumer of raw provider data goes through `resolveDomain`
+so the multi-source layer (swappable sources, honest degrade, fan-in) is the single
+funnel. The originally-intended *deletion* of the legacy fetchers turned out to be
+blocked by missing infrastructure (see "Blocked" below) — so P4 delivered the
+safe consolidation and explicitly did NOT delete live code.
+
+**Done (verified, zero regressions — backend 610 pass / 1 skip, tsc 70):**
+- P4.1 `GET /history` (history-routes.ts) → `resolveDomain('price_bars')`;
+  returns `record[0].data` (== the raw `fetchPriceBars` payload) so the frontend
+  contract is byte-identical. 19 route tests pass.
+- P4.2 `GET /options-history` (options-history-routes.ts) → `resolveDomain('option_chain')`;
+  vault key still resolved + passed as `ctx.apiKey`; returns `record[0].data`.
+- P4.4 screener `evaluateTicker` `fetchPriceBars` → `resolveDomain('price_bars')`;
+  `barsRes` typed back to `PriceBarsResult` so `barsRes.bars` shape is preserved.
+  22 screener tests pass.
+
+**Blocked / NOT done (deliberately, to avoid breaking the running app):**
+- P4.3 data-ingestion fundamentals repoint: `fetchRealFinancialData`
+  (data-ingestion.ts:402) is a **multi-domain orchestrator** (fundamental +
+  technical + sentiment + market + bars), not just fundamentals. `resolveDomain('fundamentals')`
+  only extracts its `fundamental_data[ticker]` slice. Repointing the ingestion
+  handler would require re-plumbing the whole 4-domain object — high regression
+  risk for a cleanup phase. Left as-is (handler still calls `fetchFinancialData`).
+- P4.5/P4.6 literal deletion of `fetchPriceBars`/`fetchOptionChain`/`fetchRealFinancialData`:
+  **NOT safe, because `resolveDomain` itself still calls all three** (domains.ts:91/101/146/186).
+  The doc's premise ("everything flows through resolveDomain → adapters →
+  `acquireSource`") was never reached — the `adapters/` layer was built in P1 but
+  never switched onto the hot path. Two hard gaps:
+  1. **No `option_chain` adapter exists.** `adapters/` only has yahoo-price,
+     finnhub-news, alphaVantage-fundamentals. The entire Massive→CBOE→mock
+     fallback + `parseCboeOptions` greeks logic lives ONLY in `fetchOptionChain`
+     (hist.ts:891). Deleting it would delete the FREE CBOE delayed options feed
+     + greeks the product depends on. `acquireSource`'s `fallbackSourceId` is a
+     field-projection fallback, not a shape-transform (CBOE needs `parseCboeOptions`
+     to become an `OptionChainResult`) — so it cannot replace `fetchOptionChain`.
+  2. `fetchRealFinancialData` is the orchestrator backing `fundamentals` +
+     technical + market, with no adapter equivalent.
+
+**To actually complete the deletion (future work, NOT a cleanup):** build the
+missing `option_chain` adapter (Massive + CBOE fallback + mock, preserving
+`parseCboeOptions` greeks) + a `fundamentals`/technical/market adapter set, then
+rewrite `resolveDomain`'s branches to use `acquireSource` + adapters. Only then do
+the legacy fetchers become dead. Until that lands, the fetchers remain as
+`resolveDomain`'s backing implementation and the grep-guard acceptance test
+(§P4 old spec) cannot pass without breaking the credentials UI / options feed.
+
 - Keep `acquireSource`/`acquireForAnalyst` (they are the engine).
-- Tests: grep guard — no `alphavantage.co`, `finnhub.io`, `api.massive.com`,
-  `cdn.cboe.com`, `YAHOO_CHART` literal left outside `adapters/` + `DEFAULT_SOURCE_URIS`.
-- Verify: full suite + frontend 322 + the earlier parity tests still green.
+- Verify (for the parts that shipped): full backend suite + frontend 327 + the
+  earlier parity tests (P0 9/9, P2b 5/5, P3a 5/5, P3b 5/5) all still green.
 
 ### P5 — Docs + migration guide
 - Update `docs/ARCHITECTURE.md` (ingestion/options rows → domain layer),

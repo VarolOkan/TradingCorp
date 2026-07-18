@@ -3,13 +3,19 @@
 // Returns a real Polygon/Massive option chain (when a key is configured) or a
 // deterministic mock chain, mapped into OptionQuote[]. Mirrors history-routes.
 //
-// KEY RESOLUTION (bugfix): the option chain key the user enters in the Settings
-// UI is stored in the ENCRYPTED VAULT under (analystId 'options_ingestion',
-// sourceId 'polygonOptions') — NOT in process.env. This route MUST resolve that
-// vault key and pass it to fetchOptionChain, otherwise the tab always falls back
-// to MOCK even though the key is set + tested OK. Env var stays as a fallback.
+// P4: funnelled through resolveDomain('option_chain'). The response shape is
+// preserved: resolveDomain records the raw fetcher result as `data`, so we
+// return `record[0].data` (== the old fetchOptionChain(...) payload).
+//
+// KEY RESOLUTION (bugfix preserved): the option chain key the user enters in the
+// Settings UI is stored in the ENCRYPTED VAULT under (analystId
+// 'options_ingestion', sourceId 'polygonOptions') — NOT in process.env. This
+// route resolves that vault key and passes it to resolveDomain as `apiKey`,
+// otherwise the domain always degrades to MOCK even with a key set + tested OK.
+// Env var stays as a fallback.
 import type { Express } from 'express';
-import { fetchOptionChain, type OptionChainFetchFn } from '../registry/logic/hist';
+import { resolveDomain } from '../registry/logic/domains';
+import type { OptionChainFetchFn } from '../registry/logic/hist';
 import { analystConfigStore } from './analyst-config';
 
 export function registerOptionsHistoryRoutes(app: Express, fetchFn?: OptionChainFetchFn): void {
@@ -27,11 +33,12 @@ export function registerOptionsHistoryRoutes(app: Express, fetchFn?: OptionChain
         sourceId: 'polygonOptions',
       });
       const apiKey = vaultKey && vaultKey.trim() ? vaultKey.trim() : undefined;
-      const opts: { apiKey?: string; fetchFn?: OptionChainFetchFn } = {};
-      if (apiKey) opts.apiKey = apiKey;
-      if (fetchFn) opts.fetchFn = fetchFn;
-      const result = await fetchOptionChain(symbol, opts);
-      return res.json(result);
+      const ctxFetch = fetchFn ? ((url: string, _init?: any) => (fetchFn as any)(url)) as any : undefined;
+      const [rec] = await resolveDomain('option_chain', symbol, {
+        ...(apiKey ? { apiKey } : {}),
+        ...(ctxFetch ? { fetchFn: ctxFetch } : {}),
+      });
+      return res.json((rec as any)?.data ?? null);
     } catch (err) {
       return res.status(502).json({
         error: `options-history fetch failed: ${err instanceof Error ? err.message : String(err)}`,

@@ -3,8 +3,15 @@
 // Returns real OHLCV price bars (Yahoo, tokenless) for a ticker, falling back
 // to deterministic mock bars if the source is unavailable. Mirrors the
 // quote-routes pattern.
+//
+// P4: now funnelled through resolveDomain('price_bars') so the multi-source
+// layer (swappable sources, honest degrade, fan-in) is the single entry point.
+// The response shape is preserved byte-for-byte: resolveDomain records the raw
+// fetcher result as `data`, so we return `record[0].data` (== the old
+// fetchPriceBars(...) payload the frontend consumes).
 import type { Express } from 'express';
-import { fetchPriceBars, type PriceBarsFetchFn } from '../registry/logic/hist';
+import { resolveDomain } from '../registry/logic/domains';
+import type { PriceBarsFetchFn } from '../registry/logic/hist';
 
 export function registerHistoryRoutes(app: Express, fetchFn?: PriceBarsFetchFn): void {
   app.get('/history', async (req, res) => {
@@ -18,12 +25,15 @@ export function registerHistoryRoutes(app: Express, fetchFn?: PriceBarsFetchFn):
     const lookbackDays = Number.isFinite(lookbackRaw) && lookbackRaw > 0 ? Math.floor(lookbackRaw) : 90;
 
     try {
-      const result = await fetchPriceBars(symbol, {
-        interval,
-        lookbackDays,
-        ...(fetchFn ? { fetchFn } : {}),
+      // Bridge the route's fetch-only double into resolveDomain's FetchFn
+      // (url + init + signal). Yahoo ignores init, so a URL-only wrapper is safe.
+      const ctxFetch = fetchFn ? ((url: string) => (fetchFn as any)(url)) as any : undefined;
+      const [rec] = await resolveDomain('price_bars', symbol, {
+        fetchFn: ctxFetch,
+        profile: { intervals: [interval as '1d'], lookbackDays } as any,
       });
-      return res.json(result);
+      // record[0].data IS the raw fetcher result (fetchPriceBars payload).
+      return res.json((rec as any)?.data ?? null);
     } catch (err) {
       return res.status(502).json({
         error: `history fetch failed: ${err instanceof Error ? err.message : String(err)}`,

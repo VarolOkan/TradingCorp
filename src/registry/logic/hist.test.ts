@@ -3,7 +3,8 @@
 // bundle is deterministic, structurally valid, and that greeks are internally
 // consistent with the chain (BS(mid) ≈ mid, since both come from greeks.ts).
 
-import { generateMockBundle, fetchHistoricalBundle, fetchOptionChain, parseYahooOptions, parseCboeOptions, resolveLiveOptionsBundle } from './hist';
+import { generateMockBundle, fetchHistoricalBundle, parseYahooOptions, parseCboeOptions } from './hist';
+import { fetchOptionChain, resolveLiveOptionsBundle } from '../sources/adapters/option-chain';
 import { bsPrice } from './greeks';
 
 describe('hist — mock bundle structure', () => {

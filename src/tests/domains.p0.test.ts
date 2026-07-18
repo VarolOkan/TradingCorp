@@ -5,8 +5,8 @@
 // changing analyst-facing behaviour.
 
 import { resolveDomain } from '../registry/logic/domains';
-import { fetchPriceBars } from '../registry/logic/hist';
-import { fetchOptionChain } from '../registry/logic/hist';
+import { acquirePriceBars } from '../registry/sources/adapters/price-bars';
+import { fetchOptionChain } from '../registry/sources/adapters/option-chain';
 import { fetchCompanyNews } from '../registry/logic/news';
 import { fetchRealFinancialData } from '../registry/logic/data-ingestion';
 
@@ -42,7 +42,7 @@ const FAIL_FETCH = async () => ({ ok: false, status: 500, json: async () => ({})
 describe('P0 resolveDomain — parity with legacy functions', () => {
   it('price_bars wraps fetchPriceBars (live yahoo)', async () => {
     const fetchFn = mockFetch(YAHOO_CHART);
-    const direct = await fetchPriceBars('AAPL', { fetchFn: fetchFn as any });
+    const direct = await acquirePriceBars('AAPL', { fetchFn: fetchFn as any });
     const [rec] = await resolveDomain('price_bars', 'AAPL', { fetchFn: fetchFn as any });
     expect(rec!.sourceId).toBe('yahoo');
     expect(rec!.status).toBe('ok');

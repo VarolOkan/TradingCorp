@@ -29,9 +29,14 @@ import type {
 } from '../../types/financial-analysis';
 import { stringToSeed, seededRandom } from './shared';
 import { bsPrice, bsGreeks, yearsToExpiry, resolveRfr, DEFAULT_RFR } from './greeks';
-import { resolveDomain } from './domains';
-import { yahooPriceAdapter } from '../sources/adapters/yahoo-price';
 import { logger } from '../../utils/logger';
+
+// P4: the price-bars + option-chain fetchers moved to adapters/{price-bars,option-chain}.ts.
+// hist.ts now owns ONLY the deterministic mock engine + the PURE parsers (no provider
+// URLs, no fetch orchestration). Type-only re-exports are erased at compile time, so
+// they create no runtime import cycle with the adapters.
+export type { PriceBarsResult, PriceBarsFetchFn } from '../sources/adapters/price-bars';
+export type { OptionChainFetchFn } from '../sources/adapters/option-chain';
 
 /**
  * The shared seededRandom LCG can emit values outside [0,1) on its early calls
@@ -75,7 +80,7 @@ export interface HistProfile {
 const MOCK_ASOF = '2026-07-10T00:00:00.000Z';
 
 /** Deterministic base spot per ticker (mirrors the equity mock's price band). */
-function basePrice(ticker: string): number {
+export function basePrice(ticker: string): number {
   const rng = makeRng(`${ticker}:spot`);
   // Believable band $40–$440, rounded to a whole dollar.
   return Math.round(40 + rng() * 400);
@@ -97,7 +102,7 @@ function deriveStrikeSpacing(spot: number): number {
 }
 
 /** Generate a seeded OHLCV random walk of `count` bars ending "now". */
-function generateBars(
+export function generateBars(
   ticker: string,
   interval: BarInterval,
   count: number,
@@ -365,74 +370,6 @@ export async function fetchHistoricalBundle(
  * @returns a single `PriceBarSeries` (one interval). For multiple intervals,
  *   call once per interval.
  */
-export type PriceBarsFetchFn = (url: string) => Promise<{
-  ok: boolean;
-  status: number;
-  json: () => Promise<any>;
-}>;
-
-function yahooRange(lookbackDays: number): string {
-  if (lookbackDays <= 1) return '1d';
-  if (lookbackDays <= 5) return '5d';
-  if (lookbackDays <= 22) return '1mo';
-  if (lookbackDays <= 66) return '3mo';
-  if (lookbackDays <= 132) return '6mo';
-  return '1y';
-}
-
-const YAHOO_CHART = (symbol: string, range: string, interval: string) =>
-  `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-    symbol,
-  ).toUpperCase()}?range=${range}&interval=${interval}`;
-
-export interface PriceBarsResult {
-  ticker: string;
-  interval: BarInterval;
-  lookback_days: number;
-  bars: PriceBar[];
-  source: 'yahoo' | 'mock';
-  note?: string;
-}
-
-export async function fetchPriceBars(
-  ticker: string,
-  opts: { interval?: BarInterval; lookbackDays?: number; fetchFn?: PriceBarsFetchFn } = {},
-): Promise<PriceBarsResult> {
-  const interval = opts.interval ?? '1d';
-  const lookbackDays = opts.lookbackDays ?? 90;
-  const sym = ticker.trim().toUpperCase();
-
-  const doFetch = opts.fetchFn ?? ((globalThis as any).fetch?.bind?.(globalThis) as PriceBarsFetchFn | undefined);
-  if (typeof doFetch === 'function') {
-    try {
-      const res = await doFetch(YAHOO_CHART(sym, yahooRange(lookbackDays), interval));
-      if (res.ok) {
-        const payload = await res.json().catch(() => null);
-        // P1: parse delegated to the Yahoo price adapter (pure, fixture-tested).
-        const parsed = yahooPriceAdapter.normalize(payload, {
-          ticker: sym,
-          interval,
-          lookbackDays,
-        });
-        if (parsed) return parsed;
-      }
-    } catch {
-      /* fall through to mock */
-    }
-  }
-
-  // Mock fallback (deterministic, parity-safe).
-  const asOf = new Date();
-  const bars = generateBars(sym, interval, lookbackDays, basePrice(sym), asOf);
-  return {
-    ticker: sym,
-    interval,
-    lookback_days: lookbackDays,
-    bars,
-    source: 'mock',
-    note: 'Live price history unavailable — showing deterministic mock bars.',
-  };
-}
 
 /**
  * Phase I (options historical chains): fetch a REAL option chain for a ticker
@@ -451,22 +388,10 @@ export async function fetchPriceBars(
  *
  * @returns an `OptionChain` (ticker + underlying + quotes + expiries + rfr).
  */
-export type OptionChainFetchFn = (url: string, headers?: Record<string, string>) => Promise<{
-  ok: boolean;
-  status: number;
-  text: () => Promise<string>;
-  json: () => Promise<any>;
-}>;
-
-function polygonSnapshotUrl(ticker: string, apiKey?: string) {
-  const base = `https://api.massive.com/v3/snapshot/options/${encodeURIComponent(
-    ticker.toUpperCase(),
-  )}`;
-  // When a key is supplied, Polygon/Massive accept it as a query param. When
-  // none is supplied (e.g. the caller injected a transport that handles auth
-  // itself) emit the bare URL.
-  return apiKey ? `${base}?apiKey=${encodeURIComponent(apiKey)}` : base;
-}
+// P4: the option-chain fetch orchestration (Massive + CBOE + Yahoo URLs) moved to
+// adapters/option-chain.ts. hist.ts keeps ONLY the PURE parsers + the deterministic
+// mock bundle (no provider URLs). The fetchers + resolveLiveOptionsBundle live in the
+// adapter; consumers import them from there (see option-chain.ts).
 
 function numOr(v: any, fallback = 0): number {
   const n = typeof v === 'number' ? v : Number(v);
@@ -653,37 +578,6 @@ export function parseCboeOptions(ticker: string, payload: any): OptionChainResul
   };
 }
 
-/** Fetches + parses the CBOE delayed options feed. No key required. */
-export async function fetchCboeOptionChain(
-  ticker: string,
-  gf?: (url: string, init?: any) => Promise<any>,
-): Promise<OptionChainResult | null> {
-  const fetchFn = gf ?? ((globalThis as any).fetch as ((url: string, init?: any) => Promise<any>) | undefined);
-  if (typeof fetchFn !== 'function') {
-    logger.warn(`[options] CBOE fallback skipped for ${ticker}: no fetch transport available.`);
-    return null;
-  }
-  try {
-    const url = `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(ticker.toUpperCase())}.json`;
-    const res = await fetchFn(url, { method: 'GET', headers: { 'User-Agent': YAHOO_UA, Accept: 'application/json' } });
-    if (!res || !res.ok) {
-      logger.warn(`[options] CBOE fallback failed for ${ticker}: HTTP ${res?.status ?? 'no-response'}. Falling back.`);
-      return null;
-    }
-    const payload = (await res.json().catch(() => null)) as any;
-    const parsed = parseCboeOptions(ticker, payload);
-    if (parsed) {
-      logger.info(`[options] CBOE delayed feed OK for ${ticker}: ${parsed.quotes.length} quotes across ${parsed.expiries.length} expiry.`);
-    } else {
-      logger.warn(`[options] CBOE fallback returned an unparseable/empty payload for ${ticker}.`);
-    }
-    return parsed;
-  } catch (e) {
-    logger.warn(`[options] CBOE fallback errored for ${ticker}: ${e instanceof Error ? e.message : String(e)}.`);
-    return null;
-  }
-}
-
 /** PURE parser: Polygon v3 options snapshot payload → OptionQuote[].
  *  Accepts either the raw `results` object (v3 shape: { ticker, underlying_asset,
  *  options: [...] }) or the bare options array. Extracted from fetchOptionChain
@@ -808,257 +702,6 @@ async function fetchWithRetry(gf: (u: string, i?: any) => Promise<any>, url: str
 }
 
 /**
- * Tokenless Yahoo options chain (v7/finance/options). Mirrors the crumb dance
- * the Quote tab already uses. Returns REAL (delayed ~15-20m) data when Yahoo is
- * reachable. No API key required — but Yahoo rate-limits aggressively, so callers
- * must treat a failure as "fall through to mock".
- */
-async function fetchYahooOptionChain(
-  ticker: string,
-  gf?: (url: string, init?: any) => Promise<any>,
-): Promise<OptionChainResult | null> {
-  const fetchFn = gf ?? ((globalThis as any).fetch as ((url: string, init?: any) => Promise<any>) | undefined);
-  if (typeof fetchFn !== 'function') {
-    logger.warn(`[options] Yahoo fallback skipped for ${ticker}: no fetch transport available (globalThis.fetch undefined and no injected fetchFn).`);
-    return null;
-  }
-  try {
-    // 1) seed the A3 session cookie
-    const seed = await fetchFn('https://fc.yahoo.com', { method: 'GET', redirect: 'manual', headers: { 'User-Agent': YAHOO_UA } });
-    const setCookie =
-      typeof (seed.headers as any).getSetCookie === 'function'
-        ? (seed.headers as any).getSetCookie()
-        : [seed.headers.get('set-cookie')].filter(Boolean);
-    const cookie = (setCookie as string[]).map((c) => c.slice(0, c.indexOf(';'))).join('; ');
-    // 2) crumb
-    const crumbRes = await fetchFn('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-      method: 'GET', redirect: 'manual',
-      headers: { 'User-Agent': YAHOO_UA, ...(cookie ? { Cookie: cookie } : {}) },
-    });
-    const crumb = (await crumbRes.text()).trim();
-    if (!crumb) {
-      logger.warn(`[options] Yahoo fallback failed for ${ticker}: crumb endpoint returned empty (status ${crumbRes.status}). Falling back to MOCK.`);
-      return null;
-    }
-    // 3) options chain (retry on 429)
-    const res = await fetchWithRetry(
-      fetchFn,
-      `https://query2.finance.yahoo.com/v7/finance/options/${encodeURIComponent(ticker.toUpperCase())}?crumb=${encodeURIComponent(crumb)}`,
-      { 'User-Agent': YAHOO_UA, ...(cookie ? { Cookie: cookie } : {}) },
-    );
-    if (!res) {
-      logger.warn(`[options] Yahoo fallback failed for ${ticker}: options request returned no response (network/timeout). Falling back to MOCK.`);
-      return null;
-    }
-    if (!res.ok) {
-      // v7/finance/options is aggressively rate-limited (HTTP 429). Fall back to
-      // the quoteSummary optionChain module (v10), which returns the SAME nested
-      // options[].calls/puts shape and is usually not rate-limited as hard.
-      logger.warn(`[options] Yahoo v7 options HTTP ${res.status} for ${ticker}; trying quoteSummary optionChain module instead.`);
-      const qsUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker.toUpperCase())}?modules=optionChain&crumb=${encodeURIComponent(crumb)}`;
-      const qsRes = await fetchWithRetry(
-        fetchFn,
-        qsUrl,
-        { 'User-Agent': YAHOO_UA, ...(cookie ? { Cookie: cookie } : {}) },
-      );
-      if (qsRes && qsRes.ok) {
-        const qsPayload = (await qsRes.json().catch(() => null)) as any;
-        // quoteSummary nests under result[0].optionChain (same inner shape).
-        const adapted = { optionChain: { result: [{ quote: qsPayload?.quoteSummary?.result?.[0]?.price ?? {}, options: qsPayload?.quoteSummary?.result?.[0]?.optionChain?.options ?? [] }] } };
-        const parsedQs = parseYahooOptions(ticker, adapted);
-        if (parsedQs) {
-          logger.info(`[options] Yahoo quoteSummary fallback OK for ${ticker}: ${parsedQs.quotes.length} quotes (source=${parsedQs.source}).`);
-          return parsedQs;
-        }
-      }
-      logger.warn(`[options] Yahoo fallback failed for ${ticker}: options request HTTP ${res.status} (likely 429 rate-limit or 401). Falling back to MOCK.`);
-      return null;
-    }
-    const payload = (await res.json().catch(() => null)) as any;
-    const parsed = parseYahooOptions(ticker, payload);
-    if (!parsed) {
-      logger.warn(`[options] Yahoo fallback returned an unparseable/empty payload for ${ticker} (check optionChain.result[0].options[].calls/puts). Falling back to MOCK.`);
-      return null;
-    }
-    logger.info(`[options] Yahoo fallback OK for ${ticker}: ${parsed.quotes.length} quotes across ${parsed.expiries.length} expiry (source=${parsed.source}).`);
-    return parsed;
-  } catch (e) {
-    logger.warn(`[options] Yahoo fallback errored for ${ticker}: ${e instanceof Error ? e.message : String(e)}. Falling back to MOCK.`);
-    return null;
-  }
-}
-
-export async function fetchOptionChain(
-  ticker: string,
-  opts: { apiKey?: string; fetchFn?: OptionChainFetchFn; rfr?: number } = {},
-): Promise<OptionChainResult> {
-  const sym = ticker.trim().toUpperCase();
-  const rfr = resolveRfr(opts.rfr);
-
-  const doFetch =
-    opts.fetchFn ??
-    ((globalThis as any).fetch?.bind?.(globalThis) as OptionChainFetchFn | undefined);
-  const fetchInjected = !!opts.fetchFn;
-  const apiKey =
-    opts.apiKey ?? (typeof process !== 'undefined' ? process.env?.POLYGON_API_KEY : undefined);
-  // Captures WHY a keyed live attempt failed, so the eventual MOCK note can say
-  // "key was set but live call returned 401" instead of a misleading silent mock.
-  let lastLiveError: string | undefined;
-  // Live path when: a transport is available AND (a key is set OR the caller
-  // explicitly injected a transport — i.e. they handle auth themselves).
-  if (typeof doFetch === 'function' && (apiKey || fetchInjected)) {
-    try {
-      // Use a Bearer header — this matches how the rest of the app (engine +
-      // the Settings [Test] probe) authenticates to api.massive.com, and is the
-      // scheme the user's key is validated against. Sending it as ?apiKey= (the
-      // old behaviour) returns 401 for some Massive endpoints and silently fell
-      // through to MOCK.
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-      const res = await doFetch(polygonSnapshotUrl(sym), apiKey ? headers : undefined);
-      // Read the raw body once so we can (a) parse the option chain and
-      // (b) extract Massive's verbatim error message on a non-ok response,
-      // without consuming the stream twice.
-      const rawText = await res.text().catch(() => '');
-      if (res.ok) {
-        const payload = (() => { try { return JSON.parse(rawText); } catch { return null; } })();
-        const results = payload?.results?.results;
-        if (Array.isArray(results) && results.length > 0) {
-          const quotes: OptionQuote[] = [];
-          const expirySet = new Set<string>();
-          const underlyingPrice =
-            numOr(payload?.results?.underlying_asset?.last_price) ||
-            numOr(results[0]?.underlying_asset?.last_price);
-          let spot = underlyingPrice || basePrice(sym);
-
-          for (const c of results) {
-            const d = c.details ?? {};
-            const expiry = (d.expiration_date as string) ?? '';
-            const strike = numOr(d.strike_price);
-            const type: OptionRight = d.contract_type === 'put' ? 'P' : 'C';
-            const greeks = c.greeks ?? {};
-            const lastQuote = c.last_quote ?? {};
-            const bid = numOr(lastQuote.bid);
-            const ask = numOr(lastQuote.ask);
-            const last = numOr(greeks.last_price ?? c.last_trade?.price ?? (bid + ask) / 2);
-            const iv = numOr(greeks.implied_volatility, 0.3);
-            const volume = numOr(c.last_trade?.size ?? greeks.size ?? 0);
-            const openInterest = numOr(d.open_interest ?? 0);
-            if (!expiry || strike <= 0) continue;
-            expirySet.add(expiry);
-            quotes.push({
-              expiry,
-              strike,
-              type,
-              bid,
-              ask,
-              last,
-              volume,
-              open_interest: openInterest,
-              iv,
-              underlying_price: spot,
-              underlying_ts: new Date().toISOString(),
-            });
-          }
-          if (quotes.length > 0) {
-            return {
-              ticker: sym,
-              underlying_price: spot,
-              quotes,
-              expiries: Array.from(expirySet).sort(),
-              rfr,
-              greeks: chainToGreeksRows(quotes, spot, rfr),
-              source: 'polygon',
-            };
-          }
-        }
-        // Reached here: live response was non-ok OR had no results. Record WHY
-        // so a keyed-but-failing attempt is diagnosable instead of a silent mock.
-        // Prefer Massive's verbatim message (e.g. "NOT_AUTHORIZED … upgrade your
-        // plan") so the UI tells the user the REAL reason, not just a status code.
-        let providerMsg = '';
-        try {
-          const b = JSON.parse(rawText);
-          if (b && typeof b.message === 'string') providerMsg = b.message;
-        } catch { /* non-JSON body */ }
-        logger.warn(`[options] ${sym}: live Polygon/Massive call returned ${res.status} (ok=${res.ok}) with no usable option chain${providerMsg ? ` — ${providerMsg}` : ''}. Falling back to MOCK.`);
-        lastLiveError = providerMsg
-          ? `live call returned HTTP ${res.status} (${providerMsg})`
-          : `live call returned HTTP ${res.status}`;
-      } else {
-        logger.warn(`[options] ${sym}: live Polygon/Massive call was not ok (status ${res.status}). Falling back to MOCK.`);
-        lastLiveError = `live call returned HTTP ${res.status}`;
-      }
-    } catch (e) {
-      logger.warn(`[options] ${sym}: live Polygon/Massive call errored: ${e instanceof Error ? e.message : String(e)}. Falling back to MOCK.`);
-      lastLiveError = e instanceof Error ? e.message : String(e);
-      /* fall through to mock */
-    }
-  }
-
-  // Mock fallback (deterministic, parity-safe). But first try Yahoo's tokenless
-  // options chain so we show REAL (delayed) data even without a Polygon key.
-  // Either way, anchor the mock on the REAL current price (from the Yahoo chart
-  // endpoint that also feeds the Quote tab) so a cheap stock like SOFI (~$18)
-  // gets ~$18 strikes instead of the old random ~$300 band.
-  let realSpot: number | undefined;
-  if (doFetch) {
-    try {
-      const pr = await fetchPriceBars(sym, { interval: '1d', lookbackDays: 5, fetchFn: doFetch as any });
-      if (pr.source === 'yahoo' && pr.bars.length > 0) {
-        const last = pr.bars[pr.bars.length - 1]!.close;
-        if (typeof last === 'number' && last > 0) realSpot = last;
-      }
-    } catch {
-      /* fall through — use the random band */
-    }
-  }
-  const mockBundle = generateMockBundle(sym, realSpot ? { spot: realSpot } : {});
-  if (!apiKey) {
-    // Real delayed data, no key: CBOE's free feed first (Yahoo's tokenless
-    // path is now 429/crumb-blocked, so it's a last-resort fallback).
-    const cboe = await fetchCboeOptionChain(sym, doFetch);
-    if (cboe) return cboe;
-    const yahoo = await fetchYahooOptionChain(sym, doFetch);
-    if (yahoo) return yahoo;
-    // Yahoo was attempted but returned nothing — explain in the console + note so
-    // the MOCK result is diagnosable rather than silent.
-    logger.warn(`[options] ${sym}: returning MOCK chain (spot ${realSpot ? realSpot.toFixed(2) : 'band'} — no POLYGON_API_KEY set and Yahoo tokenless fetch returned no data). Set POLYGON_API_KEY for live, or check the [options] logs above for the Yahoo failure reason.`);
-    return {
-      ticker: sym,
-      underlying_price: mockBundle.underlying_price,
-      quotes: mockBundle.option_chain,
-      expiries: mockBundle.expiries,
-      rfr,
-      greeks: chainToGreeksRows(mockBundle.option_chain, mockBundle.underlying_price, rfr),
-      source: 'mock',
-      note: realSpot
-        ? `MOCK — strikes centered on real quote $${realSpot.toFixed(2)}, but no live option chain (no POLYGON_API_KEY and Yahoo tokenless fetch returned no data). See backend [options] logs.`
-        : 'MOCK — no live feed. No POLYGON_API_KEY and Yahoo tokenless fetch returned no data. See backend [options] logs.',
-    };
-  }
-  // Before falling back to a deterministic MOCK, try CBOE's free delayed
-  // feed. This is the honest "real bid/ask another way" path: it needs no
-  // key, so it works whether or not a (entitlement-blocked) Massive key is
-  // set. We prefer real delayed data over a synthetic mock wherever possible.
-  const cboe = await fetchCboeOptionChain(sym, doFetch);
-  if (cboe) return cboe;
-
-  return {
-    ticker: sym,
-    underlying_price: mockBundle.underlying_price,
-    quotes: mockBundle.option_chain,
-    expiries: mockBundle.expiries,
-    rfr,
-    greeks: chainToGreeksRows(mockBundle.option_chain, mockBundle.underlying_price, rfr),
-    source: 'mock',
-    note: lastLiveError
-      ? `MOCK — a Massive/Polygon key was configured but the live option-chain call failed (${lastLiveError}). See backend [options] logs.`
-      : 'Live option chain unavailable — showing deterministic mock chain.',
-  };
-}
-
-/**
  * Phase I (options ingestion wiring): upgrade a base `HistoricalBundle`
  * (typically the mock bundle) with LIVE price bars + option chain when a
  * Polygon key (and a fetch transport) is available. Returns a bundle whose
@@ -1067,18 +710,8 @@ export async function fetchOptionChain(
  * the missing piece(s). This is the glue that lets `options_ingestion` consume
  * real data with zero behavioral change when no key is present (parity).
  */
-export interface LiveOptionsResult extends HistoricalBundle {
-  /** 'live' when both price bars + chain came from a provider; 'mock' otherwise. */
-  source: 'polygon' | 'yahoo' | 'cboe' | 'mock';
-  /** True when the option CHAIN was acquired live (drives the Options-tab badge). */
-  chainLive?: boolean;
-  /** True when the historical price BARS were acquired live (tracked separately). */
-  barsLive?: boolean;
-  /** Provenance note (e.g. Massive 401 entitlement story, or CBOE delayed feed). */
-  note?: string;
-}
 
-function chainToGreeksRows(
+export function chainToGreeksRows(
   quotes: OptionQuote[],
   spot: number,
   rfr: number,
@@ -1103,72 +736,4 @@ function chainToGreeksRows(
     });
   }
   return rows;
-}
-
-export async function resolveLiveOptionsBundle(
-  ticker: string,
-  profile: HistProfile = {},
-  opts: { apiKey?: string; fetchFn?: OptionChainFetchFn } = {},
-): Promise<LiveOptionsResult> {
-  const base = generateMockBundle(ticker, profile);
-  const rfr = base.rfr;
-
-  // Live price bars (Yahoo, tokenless).
-  const [priceRec] = await resolveDomain('price_bars', ticker, {
-    fetchFn: opts.fetchFn as any,
-    profile: {
-      intervals: [profile.intervals?.[0] === '5m' || profile.intervals?.[0] === '1m' ? (profile.intervals[0] as '5m' | '1m') : '1d'],
-      lookbackDays: profile.lookbackDays ?? 90,
-    },
-  });
-  const priceRes = priceRec!.data;
-  const priceMock = priceRes.source === 'mock';
-
-  // Live option chain (Polygon, keyed).
-  const [chainRec] = await resolveDomain('option_chain', ticker, {
-    fetchFn: opts.fetchFn as any,
-    ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
-  });
-  const chainRes = chainRec!.data;
-  const chainMock = chainRes.source === 'mock';
-
-  // Real-bid/ask fallback: if the keyed Polygon path wasn't entitled (or no
-  // key), try CBOE's free delayed feed before settling for a synthetic mock
-  // chain. This keeps the vol-surface / pricing analysts on REAL data.
-  let chainFinal = chainRes;
-  if (chainMock) {
-    const gf = opts.fetchFn ?? ((globalThis as any).fetch as ((u: string, i?: any) => Promise<any>) | undefined);
-    const cboe = await fetchCboeOptionChain(ticker, gf as any);
-    if (cboe) chainFinal = cboe;
-  }
-
-  const price_bars: PriceBarSeries[] = priceMock
-    ? base.price_bars
-    : [
-        {
-          interval: priceRes.interval,
-          lookback_days: priceRes.lookback_days,
-          bars: priceRes.bars,
-        },
-      ];
-
-  const option_chain = chainFinal.source === 'mock' ? base.option_chain : chainFinal.quotes;
-  const underlying_price = chainFinal.source === 'mock' ? base.underlying_price : chainFinal.underlying_price;
-  const greeks = chainToGreeksRows(option_chain, underlying_price, rfr);
-  const expiries = chainFinal.source === 'mock' ? base.expiries : chainFinal.expiries;
-
-  const live = !priceMock && chainFinal.source !== 'mock';
-  return {
-    ticker,
-    underlying_price,
-    price_bars,
-    option_chain,
-    greeks,
-    rfr,
-    expiries,
-    iv_history: base.iv_history,
-    mock: !live,
-    source: chainFinal.source,
-    ...(chainFinal.note ? { note: chainFinal.note } : {}),
-  };
 }

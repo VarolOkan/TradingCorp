@@ -18,7 +18,8 @@
 // The screener is DETERMINISTIC given the same (bars, news) inputs, so it is
 // fully unit-testable with injected fetch fns (no network needed).
 
-import { fetchPriceBars, type PriceBarsFetchFn } from './hist';
+import { resolveDomain } from './domains';
+import type { PriceBarsFetchFn, PriceBarsResult } from './hist';
 import { fetchCompanyNews, scoreHeadline, type NewsFetchFn } from './news';
 import { AGENCIES } from '../agencies';
 import { getUniverse, type UniverseTrace } from './universe';
@@ -272,17 +273,21 @@ async function evaluateTicker(
   weights: Record<string, number>,
   opts: Required<Pick<ScreenerOptions, 'interval' | 'lookbackDays' | 'finnhubKey'>> & ScreenerOptions,
 ): Promise<ScreenerRow> {
-  const [barsRes, newsRes] = await Promise.all([
-    fetchPriceBars(ticker, {
-      interval: opts.interval,
-      lookbackDays: opts.lookbackDays,
-      fetchFn: opts.fetchFn,
-    }),
-    fetchCompanyNews(ticker, {
-      ...(opts.newsFetchFn ? { fetchFn: opts.newsFetchFn } : {}),
-      ...(opts.finnhubKey ? { finnhubKey: opts.finnhubKey } : {}),
-    }).catch(() => null),
-  ]);
+  // P4: price bars now funnelled through resolveDomain('price_bars') so the
+  // multi-source layer (swappable sources, honest degrade) is the single entry.
+  // record[0].data === the raw fetchPriceBars result (bars + source), so the
+  // downstream `barsRes.bars` shape is preserved byte-for-byte.
+  const ctxFetch = opts.fetchFn ? ((url: string) => (opts.fetchFn as any)(url)) as any : undefined;
+  const [barsRec] = await resolveDomain('price_bars', ticker, {
+    ...(ctxFetch ? { fetchFn: ctxFetch } : {}),
+    profile: { intervals: [opts.interval as '1d'], lookbackDays: opts.lookbackDays } as any,
+  });
+  const barsRes = ((barsRec as any)?.data ?? { bars: [], source: 'mock' as const }) as PriceBarsResult;
+
+  const newsRes = await fetchCompanyNews(ticker, {
+    ...(opts.newsFetchFn ? { fetchFn: opts.newsFetchFn } : {}),
+    ...(opts.finnhubKey ? { finnhubKey: opts.finnhubKey } : {}),
+  }).catch(() => null);
 
   const closes = barsRes.bars.map((b) => b.close);
   const volumes = barsRes.bars.map((b) => b.volume);

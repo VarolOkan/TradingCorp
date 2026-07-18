@@ -1,7 +1,7 @@
 // src/tests/options-history.test.ts
 // Phase I (options historical chains): real Polygon chain + mock fallback.
 import { registerOptionsHistoryRoutes } from '../server/options-history-routes';
-import { fetchOptionChain } from '../registry/logic/hist';
+import { fetchOptionChain } from '../registry/sources/adapters/option-chain';
 import express from 'express';
 import request from 'supertest';
 
