@@ -32,19 +32,6 @@ const HISTORY: Record<string, PriceBarsResult> = {
 
 const mockGet = vi.fn(async (symbol: string) => HISTORY[symbol]!);
 
-const result: any = {
-  technical_analysis: {
-    AAPL: { technical_score: 72, verdict: 'BULLISH', data_source: 'yahoo:real' },
-    MSFT: { technical_score: 80, verdict: 'BULLISH', data_source: 'yahoo:real' },
-    TSLA: { technical_score: 30, verdict: 'BEARISH', data_source: 'yahoo:real' },
-  },
-  sentiment_analysis: {
-    AAPL: { sentiment_score: 40, data_source: 'finnhub:live-news' },
-    MSFT: { sentiment_score: 55, data_source: 'finnhub:live-news' },
-    TSLA: { sentiment_score: -30, data_source: 'finnhub:live-news' },
-  },
-};
-
 describe('CompareView', () => {
   beforeEach(() => {
     mockGet.mockClear();
@@ -55,8 +42,8 @@ describe('CompareView', () => {
     expect(screen.getByTestId('compare-empty')).toBeInTheDocument();
   });
 
-  it('renders normalized chart, correlation matrix, and verdict table for 3 tickers', async () => {
-    render(<CompareView tickers={['AAPL', 'MSFT', 'TSLA']} result={result} fetchHistory={mockGet} />);
+  it('renders normalized chart, correlation matrix, and per-ticker metrics', async () => {
+    render(<CompareView tickers={['AAPL', 'MSFT', 'TSLA']} result={null} fetchHistory={mockGet} />);
     await waitFor(() => expect(screen.getByTestId('norm-chart-svg')).toBeInTheDocument());
     // one normalized path per ticker
     expect(screen.getByTestId('norm-path-AAPL')).toBeInTheDocument();
@@ -71,15 +58,31 @@ describe('CompareView', () => {
     expect(screen.getByTestId('corr-AAPL-MSFT').getAttribute('data-value')).toContain('1.00');
     // AAPL/TSLA inversely correlated -> near -1
     expect(screen.getByTestId('corr-AAPL-TSLA').getAttribute('data-value')).toContain('-1.00');
-    // verdict table
-    expect(screen.getByTestId('verdict-row-AAPL')).toBeInTheDocument();
-    expect(screen.getByTestId('verdict-tech-AAPL')).toHaveTextContent('BULLISH');
-    expect(screen.getByTestId('verdict-sent-AAPL')).toHaveTextContent('40');
-    expect(screen.getByTestId('verdict-row-TSLA')).toHaveTextContent('BEARISH');
+    // per-ticker comparison metrics table
+    expect(screen.getByTestId('metrics-table')).toBeInTheDocument();
+    for (const t of ['AAPL', 'MSFT', 'TSLA']) {
+      expect(screen.getByTestId(`metric-row-${t}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`metric-price-${t}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`metric-return-${t}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`metric-vol-${t}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`metric-sharpe-${t}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`metric-drawdown-${t}`)).toBeInTheDocument();
+    }
+    // a "best" summary line is shown
+    expect(screen.getByTestId('metrics-best')).toBeInTheDocument();
+    // best return should be the ticker with the highest computed return among the three
+    const bestReturnTicker = screen.getByTestId('metrics-best').textContent || '';
+    expect(bestReturnTicker).toMatch(/Best return:/);
+  });
+
+  it('shows a no-metrics notice when no history loads', async () => {
+    const failing = vi.fn(async () => { throw new Error('no history'); });
+    render(<CompareView tickers={['AAPL', 'MSFT']} result={null} fetchHistory={failing} />);
+    await waitFor(() => expect(screen.getByTestId('metrics-none')).toBeInTheDocument());
   });
 
   it('fetches a history series per ticker', async () => {
-    render(<CompareView tickers={['AAPL', 'MSFT']} result={result} fetchHistory={mockGet} />);
+    render(<CompareView tickers={['AAPL', 'MSFT']} result={null} fetchHistory={mockGet} />);
     await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
   });
 });

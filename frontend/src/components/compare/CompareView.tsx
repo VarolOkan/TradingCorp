@@ -26,20 +26,59 @@ interface SeriesState {
   [ticker: string]: PriceBarsResult | 'error' | undefined;
 }
 
-function verdictLabel(score: number | null | undefined): string {
-  if (score == null || !isFinite(score)) return '—';
-  if (score >= 60) return 'BULLISH';
-  if (score >= 45) return 'NEUTRAL';
-  return 'BEARISH';
+// ---- Per-ticker comparison metrics (computed from price history) ----
+// These give the user something genuinely comparable across tickers so they
+// can pick the "best" stock on a concrete metric, rather than a per-analyst
+// verdict table that merely duplicates the Results panel.
+function totalReturn(closes: number[]): number {
+  if (closes.length < 2) return 0;
+  const first = closes[0];
+  const last = closes[closes.length - 1];
+  return ((last - first) / first) * 100;
 }
-function verdictClass(score: number | null | undefined): string {
-  const l = verdictLabel(score).toLowerCase();
-  return `verdict-${l}`;
+function annualizedVol(returns: number[]): number {
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1);
+  const daily = Math.sqrt(variance);
+  // scale to an annual figure assuming ~252 trading days
+  return daily * Math.sqrt(252) * 100;
+}
+function sharpe(returns: number[], rfAnnual = 0): number {
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1);
+  const daily = Math.sqrt(variance);
+  if (daily === 0) return 0;
+  const annualReturn = mean * 252 * 100;
+  return (annualReturn - rfAnnual) / (daily * Math.sqrt(252) * 100);
+}
+function maxDrawdown(closes: number[]): number {
+  if (closes.length === 0) return 0;
+  let peak = closes[0];
+  let maxDd = 0;
+  for (const c of closes) {
+    if (c > peak) peak = c;
+    const dd = (c - peak) / peak;
+    if (dd < maxDd) maxDd = dd;
+  }
+  return maxDd * 100;
+}
+// Higher-is-better metrics vs lower-is-better (risk) metrics.
+const HIGHER_BETTER = new Set(['return', 'sharpe']);
+
+interface TickerMetric {
+  ticker: string;
+  price: number | null;
+  return: number;
+  vol: number;
+  sharpe: number;
+  drawdown: number;
 }
 
 export function CompareView({
   tickers,
-  result,
+  result: _result,
   fetchHistory,
   interval = '1d',
   lookbackDays = 90,
@@ -105,6 +144,26 @@ export function CompareView({
     returns[t] = dailyReturns(aligned[i]!);
   });
 
+  // Per-ticker metrics from the loaded price history.
+  const metrics: TickerMetric[] = tickersAligned.map((t) => {
+    const closes = closesByTicker[t];
+    const ret = totalReturn(closes);
+    const vol = annualizedVol(returns[t]);
+    const sh = sharpe(returns[t]);
+    const dd = maxDrawdown(closes);
+    const price = closes.length ? closes[closes.length - 1] : null;
+    return { ticker: t, price, return: ret, vol, sharpe: sh, drawdown: dd };
+  });
+  const bestBy = (key: 'return' | 'vol' | 'sharpe' | 'drawdown'): string | null => {
+    if (metrics.length === 0) return null;
+    const higher = HIGHER_BETTER.has(key);
+    let best = metrics[0];
+    for (const m of metrics) {
+      if (higher ? m[key] > best[key] : m[key] < best[key]) best = m;
+    }
+    return best.ticker;
+  };
+
   return (
     <div className="compare-view" data-testid="compare-view">
       <div className="compare-section">
@@ -115,9 +174,7 @@ export function CompareView({
             Could not load price history for any ticker.
           </p>
         )}
-        {loaded.length >= 2 && (
-          <NormalizedPerformanceChart series={normSeries} />
-        )}
+        {loaded.length >= 2 && <NormalizedPerformanceChart series={normSeries} />}
       </div>
 
       <div className="compare-section">
@@ -126,42 +183,70 @@ export function CompareView({
       </div>
 
       <div className="compare-section">
-        <h4 className="compare-h">Side-by-side verdicts</h4>
-        <table className="verdict-compare" data-testid="verdict-compare">
-          <thead>
-            <tr>
-              <th data-testid="verdict-col-ticker">Ticker</th>
-              <th data-testid="verdict-col-technical">Technical</th>
-              <th data-testid="verdict-col-sentiment">Sentiment</th>
-              <th data-testid="verdict-col-source">Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickers.map((t) => {
-              const tech = result?.technical_analysis?.[t];
-              const sent = result?.sentiment_analysis?.[t];
-              const techScore = tech?.technical_score ?? tech?.score ?? null;
-              const sentScore = sent?.sentiment_score ?? sent?.news_sentiment != null
-                ? sent.sentiment_score
-                : null;
-              const source = tech?.data_source ?? sent?.data_source ?? '—';
-              return (
-                <tr key={t} data-testid={`verdict-row-${t}`}>
-                  <th data-testid={`verdict-ticker-${t}`}>{t}</th>
-                  <td className={verdictClass(techScore)} data-testid={`verdict-tech-${t}`}>
-                    {verdictLabel(techScore)}
-                    {techScore != null && <span className="verdict-score"> ({Math.round(techScore)})</span>}
+        <h4 className="compare-h">Per-ticker comparison</h4>
+        <p className="compare-sub">
+          Risk/return metrics computed from {lookbackDays}-day price history for {tickers.join(', ')}.
+          The best value in each row is highlighted.
+        </p>
+        {metrics.length === 0 ? (
+          <p className="compare-empty" data-testid="metrics-none">
+            No price history available to compute comparison metrics.
+          </p>
+        ) : (
+          <table className="verdict-compare" data-testid="metrics-table">
+            <thead>
+              <tr>
+                <th data-testid="metric-col-ticker">Ticker</th>
+                <th data-testid="metric-col-price">Price</th>
+                <th data-testid="metric-col-return">Return %</th>
+                <th data-testid="metric-col-vol">Volatility %</th>
+                <th data-testid="metric-col-sharpe">Sharpe</th>
+                <th data-testid="metric-col-drawdown">Max DD %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metrics.map((m) => (
+                <tr key={m.ticker} data-testid={`metric-row-${m.ticker}`}>
+                  <th data-testid={`metric-ticker-${m.ticker}`}>{m.ticker}</th>
+                  <td data-testid={`metric-price-${m.ticker}`}>
+                    {m.price != null ? m.price.toFixed(2) : '—'}
                   </td>
-                  <td className={verdictClass(sentScore)} data-testid={`verdict-sent-${t}`}>
-                    {sent ? verdictLabel(sentScore) : '—'}
-                    {sentScore != null && <span className="verdict-score"> ({Math.round(sentScore)})</span>}
+                  <td
+                    className={m.ticker === bestBy('return') ? 'metric-best' : ''}
+                    data-testid={`metric-return-${m.ticker}`}
+                  >
+                    {m.return.toFixed(1)}
                   </td>
-                  <td className="verdict-source" data-testid={`verdict-source-${t}`}>{source}</td>
+                  <td
+                    className={m.ticker === bestBy('vol') ? 'metric-best' : ''}
+                    data-testid={`metric-vol-${m.ticker}`}
+                  >
+                    {m.vol.toFixed(1)}
+                  </td>
+                  <td
+                    className={m.ticker === bestBy('sharpe') ? 'metric-best' : ''}
+                    data-testid={`metric-sharpe-${m.ticker}`}
+                  >
+                    {m.sharpe.toFixed(2)}
+                  </td>
+                  <td
+                    className={m.ticker === bestBy('drawdown') ? 'metric-best' : ''}
+                    data-testid={`metric-drawdown-${m.ticker}`}
+                  >
+                    {m.drawdown.toFixed(1)}
+                  </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {metrics.length > 0 && (
+          <p className="compare-best" data-testid="metrics-best">
+            Best return: <strong>{bestBy('return')}</strong> · Best risk-adjusted (Sharpe):{' '}
+            <strong>{bestBy('sharpe')}</strong> · Lowest volatility:{' '}
+            <strong>{bestBy('vol')}</strong> · Smallest drawdown: <strong>{bestBy('drawdown')}</strong>
+          </p>
+        )}
       </div>
     </div>
   );

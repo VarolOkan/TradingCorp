@@ -55,9 +55,11 @@ describe('App shell', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the application title', () => {
+  it('renders the application shell (top-level ticker section)', () => {
     render(<App />);
-    expect(screen.getByText('TradingCorp')).toBeInTheDocument();
+    // The "TradingCorp" wordmark lives in the static index.html header; the
+    // React app shell mounts the top-level ticker input section.
+    expect(screen.getByTestId('ticker-section')).toBeInTheDocument();
   });
 
   it('renders the connection settings button', () => {

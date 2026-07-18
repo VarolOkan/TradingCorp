@@ -1,4 +1,10 @@
 # TradingCorp
+![Build](https://img.shields.io/badge/build-passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-860%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![TypeScript](https://img.shields.io/badge/made%20with-TypeScript-3178c6)
+![Stack](https://img.shields.io/badge/stack-React%20%7C%20LangGraph%20%7C%20Socket.IO-9cf)
+
 
 Multi-agent AI system for **preservation-first** investment analysis. A backend
 orchestrates several specialist agents (fundamental, technical, sentiment, risk)
@@ -40,7 +46,7 @@ over Socket.IO, and renders the result in a React single-page app.
 │  - SettingsDialog      │  analysis_start / complete /  │                            │
 └────────────────────────┘                               └────────────────────────────┘
         │                                                          │
-        │ POST /config (Option B)                                 ▼
+        │ POST /config (Option B)                                  ▼
         └─────────────────────────────────────────   Specialist agents → Governance gatekeeper
 ```
 

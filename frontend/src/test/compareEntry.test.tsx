@@ -76,9 +76,7 @@ describe('Compare entry UX (pill input)', () => {
     expect(hint.textContent).toMatch(/Run \[Analyze\]/);
   });
 
-  it('2 tickers after a completed Analyze run: Compare button appears, verdicts populated', async () => {
-    // Give the completed run real per-ticker verdicts so the side-by-side table
-    // is populated (not all "-").
+  it('2 tickers after a completed Analyze run: Compare button appears, per-ticker metrics show', async () => {
     const socket = fakeSocket();
     const handlers: Record<string, (p?: any) => void> = {};
     (socket.on as any) = (e: string, cb: (p?: any) => void) => { handlers[e] = cb; };
@@ -90,14 +88,6 @@ describe('Compare entry UX (pill input)', () => {
           decision: 'APPROVE',
           confidence: 0.5,
           company_name: 'Test Co',
-          technical_analysis: {
-            AAPL: { technical_score: 72, verdict: 'BULLISH', data_source: 'yahoo:real' },
-            MSFT: { technical_score: 80, verdict: 'BULLISH', data_source: 'yahoo:real' },
-          },
-          sentiment_analysis: {
-            AAPL: { sentiment_score: 40, data_source: 'finnhub:live-news' },
-            MSFT: { sentiment_score: 55, data_source: 'finnhub:live-news' },
-          },
           analystTraces: [],
         });
       }
@@ -112,10 +102,11 @@ describe('Compare entry UX (pill input)', () => {
     expect(await screen.findByTestId('compare-view')).toBeTruthy();
     expect(screen.getByText('Relative performance (rebased to 100)')).toBeTruthy();
     expect(screen.getByText('Return correlation')).toBeTruthy();
-    expect(screen.getByText('Side-by-side verdicts')).toBeTruthy();
-    // Verdicts come from the run, not "-".
-    expect(screen.getByTestId('verdict-tech-AAPL').textContent).toMatch(/BULLISH/);
-    expect(screen.getByTestId('verdict-sent-MSFT').textContent).toMatch(/55/);
+    expect(screen.getByText('Per-ticker comparison')).toBeTruthy();
+    // Per-ticker comparison metrics render from price history.
+    expect(screen.getByTestId('metrics-table')).toBeInTheDocument();
+    expect(screen.getByTestId('metric-row-AAPL')).toBeInTheDocument();
+    expect(screen.getByTestId('metric-row-MSFT')).toBeInTheDocument();
   });
 
   it('caps at 6 pills in the input box', async () => {

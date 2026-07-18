@@ -3349,8 +3349,14 @@ body {
 .verdict-bullish { color: #34d399; font-weight: 600; }
 .verdict-bearish { color: #f87171; font-weight: 600; }
 .verdict-neutral { color: #cbd5e1; }
+.verdict-approve { color: #34d399; font-weight: 600; }
+.verdict-reject { color: #f87171; font-weight: 600; }
 .verdict-score { opacity: 0.7; font-weight: 400; }
 .verdict-source { color: #94a3b8; font-size: 0.7rem; }
+.compare-sub { color: #94a3b8; font-size: 0.74rem; margin: 0.2rem 0 0.6rem; }
+.metric-best { color: #34d399; font-weight: 700; background: rgba(52, 211, 153, 0.12); }
+.compare-best { color: #cbd5e1; font-size: 0.76rem; margin: 0.6rem 0 0; }
+.compare-best strong { color: #34d399; }
 
 /* Stock Screener (Phase 6) */
 .screener-panel { margin: 0.5rem 0; background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 12px; padding: 0.6rem 0.8rem; }
