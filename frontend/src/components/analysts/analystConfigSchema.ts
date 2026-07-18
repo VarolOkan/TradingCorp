@@ -135,6 +135,28 @@ const WEIGHT_DEFAULTS: Record<string, Record<string, number>> = {
 };
 
 /**
+ * Apply KEY-GROUP annotation to credentialed sources. Sources that share one
+ * upstream API key (e.g. Polygon/Massive's options snapshot + daily aggregates)
+ * are tagged with the same `keyGroup` so the shared `SourcesTab` renders a
+ * SINGLE token field + a SINGLE combined [Test] button at the bottom, with the
+ * two endpoint inputs grouped together (not split by a per-endpoint Test
+ * button). This is the canonical grouping used by BOTH the General Settings →
+ * Sources tab and the per-analyst (Data Ingestion) Settings dialog, so they
+ * stay byte-identical.
+ */
+function withKeyGroups(sources: SourceCredField[]): SourceCredField[] {
+  return sources.map((s) => {
+    if (s.sourceId === 'polygonOptions') {
+      return { ...s, keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Options snapshot' };
+    }
+    if (s.sourceId === 'polygonHist') {
+      return { ...s, keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Daily aggregates' };
+    }
+    return s;
+  });
+}
+
+/**
  * Build the per-card config schema for one analyst.
  * @param analystId   e.g. 'technical'
  * @param name        display name
@@ -150,19 +172,21 @@ export function buildAnalystConfigSchema(
     default: WEIGHT_DEFAULTS[analystId]?.[w.key] ?? 0,
   }));
 
-  const sources: SourceCredField[] = catalogSources
-    .filter((s) => s.id && s.label)
-    .map((s) => ({
-      sourceId: s.id,
-      label: s.label,
-      auth: (s.auth === 'bearer' || s.auth === 'apikey' || s.auth === 'finnhub' ? s.auth : 'token') as SourceCredField['auth'],
-      uriRequired: true,
-      uriLabel: 'Base URI',
-      // Pre-fill each known source's canonical endpoint (mirrors backend
-      // DEFAULT_SOURCE_URIS) so the user only confirms.
-      uriDefault: DEFAULT_SOURCE_URIS[s.id] ?? '',
-      hasToken: s.hasToken === true,
-    }));
+  const sources: SourceCredField[] = withKeyGroups(
+    catalogSources
+      .filter((s) => s.id && s.label)
+      .map((s) => ({
+        sourceId: s.id,
+        label: s.label,
+        auth: (s.auth === 'bearer' || s.auth === 'apikey' || s.auth === 'finnhub' ? s.auth : 'token') as SourceCredField['auth'],
+        uriRequired: true,
+        uriLabel: 'Base URI',
+        // Pre-fill each known source's canonical endpoint (mirrors backend
+        // DEFAULT_SOURCE_URIS) so the user only confirms.
+        uriDefault: DEFAULT_SOURCE_URIS[s.id] ?? '',
+        hasToken: s.hasToken === true,
+      })),
+  );
 
   return { analystId, name, weights, sources, flavors: [], hasConfig: weights.length + sources.length > 0 };
 }

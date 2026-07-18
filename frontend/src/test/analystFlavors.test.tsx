@@ -24,6 +24,28 @@ describe('buildAnalystConfigSchema flavors field', () => {
     expect(Array.isArray(s.flavors)).toBe(true);
     expect(s.flavors.length).toBe(0);
   });
+
+  it('groups Massive/Polygon options + aggregates into ONE keyGroup (shared token + combined Test)', () => {
+    // This is the schema the Data Ingestion agent's Settings dialog builds for
+    // the Polygon sources — it MUST match the General Settings → Sources tab
+    // layout: a single shared token field + a single combined [Test] button,
+    // with both endpoints grouped (not two separate single-source rows).
+    const s = buildAnalystConfigSchema('options_ingestion', 'Options Ingestion', [
+      { id: 'polygonOptions', label: 'Polygon Options', auth: 'bearer' },
+      { id: 'polygonHist', label: 'Polygon Aggregates', auth: 'bearer' },
+    ]);
+    expect(s.sources).toHaveLength(2);
+    const opt = s.sources.find((x) => x.sourceId === 'polygonOptions')!;
+    const agg = s.sources.find((x) => x.sourceId === 'polygonHist')!;
+    expect(opt.keyGroup).toBe('massive');
+    expect(opt.keyGroupLabel).toBe('Massive/Polygon Options');
+    expect(opt.endpointLabel).toBe('Options snapshot');
+    expect(agg.keyGroup).toBe('massive');
+    expect(agg.keyGroupLabel).toBe('Massive/Polygon Options');
+    expect(agg.endpointLabel).toBe('Daily aggregates');
+    // Both share the SAME group, so SourcesTab collapses them into one block.
+    expect(opt.keyGroup).toBe(agg.keyGroup);
+  });
 });
 
 describe('AnalystSettingsDialog Flavor section', () => {

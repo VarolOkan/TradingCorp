@@ -165,19 +165,14 @@ export function SettingsDialog({
     const optCatalog = sourceCatalogOpt;
     if (!optCatalog) return di;
     const opt = buildAnalystConfigSchema('options_ingestion', 'Options Ingestion', optCatalog.sources).sources
-      .map((s) => {
-        const base = { ...s, analystId: 'options_ingestion' as const };
-        // Polygon/Massive options snapshot + daily aggregates share ONE Massive
-        // API key. Collapse them into a single key group so the user enters the
-        // key once; each endpoint is listed beneath the shared token field.
-        if (s.sourceId === 'polygonOptions') {
-          return { ...base, keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Options snapshot' };
-        }
-        if (s.sourceId === 'polygonHist') {
-          return { ...base, keyGroup: 'massive', keyGroupLabel: 'Massive/Polygon Options', endpointLabel: 'Daily aggregates' };
-        }
-        return base;
-      });
+      .map((s) => ({
+        ...s,
+        // Polygon/Massive options + aggregates already share ONE key group via
+        // buildAnalystConfigSchema (single token field + combined [Test]).
+        // The only per-tab tweak here is storing these options sources under
+        // `options_ingestion` so the saved key lands where the engine resolves it.
+        analystId: 'options_ingestion' as const,
+      }));
     // Merge, de-dup by sourceId (defensive).
     const byId = new Map<string, SourceCredField>();
     for (const s of [...di, ...opt]) byId.set(s.sourceId, s);

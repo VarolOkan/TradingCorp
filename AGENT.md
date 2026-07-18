@@ -195,6 +195,25 @@ not "zero errors."
   CBOE sample).
 - Deterministic fixtures beat live fetches in CI.
 
+## 9b. COMMIT GATE — HARD RULE (always ask first)
+
+**NEVER run `git commit` (or `git add && git commit`, or any commit shortcut) without
+explicitly asking the user first and receiving a go-ahead.** This applies even when:
+- the user said "commit the changes" earlier in the session — re-confirm before EACH
+  new commit, because scope/intent may have changed;
+- the change is tiny, a one-liner, or "obviously correct";
+- you are mid-task and think committing is the natural next step.
+
+Process:
+1. Stage/show the intended diff (`git status` / `git diff`) so the user sees exactly
+   what would be committed.
+2. Ask — in plain text, not buried in a log dump — whether to proceed with the commit.
+3. Only commit after the user says yes (or "proceed" / "go ahead" to that specific ask).
+4. Never `--amend` or `--no-verify` without asking. Never force-push.
+
+The only exception is if the user gives a direct, explicit "commit now" instruction for
+that specific change in that turn. When in doubt, ASK.
+
 ## 10. Tooling decision — Graphify (codebase knowledge graph for LLM context)
 
 **Decision: ADOPT AS AN AID (pilot recommended), NOT a substitute for the
