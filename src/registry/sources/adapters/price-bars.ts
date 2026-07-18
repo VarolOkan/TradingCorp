@@ -1,5 +1,5 @@
 // src/registry/sources/adapters/price-bars.ts
-// P4 (docs/MULTI_SOURCE_ARCHITECTURE.md §P4). Relocation of the price-bars
+// P4 (docs/ARCHITECTURE.md §Multi-Source Data Architecture, P4). Relocation of the price-bars
 // acquisition logic out of the legacy hist.ts fetcher and into the adapter layer
 // (allow-listed by the grep guard — every provider URL now lives in `adapters/`
 // or `DEFAULT_SOURCE_URIS`). The PARSE half is the shared `yahooPriceAdapter`;

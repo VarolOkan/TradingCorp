@@ -1,5 +1,5 @@
 // src/registry/logic/domains.ts
-// P0 of the multi-source architecture (see docs/MULTI_SOURCE_ARCHITECTURE.md).
+// P0 of the multi-source architecture (see docs/ARCHITECTURE.md §Multi-Source Data Architecture).
 //
 // `resolveDomain(domain, ticker, ctx)` is the SINGLE entry point analysts will
 // use to get data. In P0 it is a PARITY-PRESERVING wrapper: it calls the

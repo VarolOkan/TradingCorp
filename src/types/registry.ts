@@ -184,7 +184,7 @@ export interface AnalystDef {
   /**
    * Typed DATA-DOMAIN contract this analyst requires (vendor-agnostic).
    * Drives `resolveDomain` routing (see src/registry/logic/domains.ts and
-   * docs/MULTI_SOURCE_ARCHITECTURE.md). Declaring domains — not providers —
+   * docs/ARCHITECTURE.md §Multi-Source Data Architecture). Declaring domains — not providers —
    * is what lets sources be swapped/added without touching the handler.
    */
   requiredDomains?: import('../registry/types/domains').DataDomain[];

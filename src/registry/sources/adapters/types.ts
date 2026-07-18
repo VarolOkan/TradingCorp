@@ -1,5 +1,5 @@
 // src/registry/sources/adapters/types.ts
-// P1 (docs/MULTI_SOURCE_ARCHITECTURE.md §4 P1). Adapter contract.
+// P1 (docs/ARCHITECTURE.md §Multi-Source Data Architecture, P1). Adapter contract.
 //
 // An ADAPTER is the *pure* parse half of a data source: it turns a raw provider
 // payload (already fetched by the caller / acquireSource) into the canonical

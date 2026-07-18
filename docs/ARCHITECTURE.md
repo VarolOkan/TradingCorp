@@ -524,3 +524,160 @@ Registered in `src/server/index.ts` via `registerReportRoutes(this.app)`.
 > now superseded by the shipped code above and have been removed; this section is
 > the current contract.
 
+
+
+## Multi-Source Data Architecture (vendor-agnostic fan-in)
+
+Status: P0–P4 SHIPPED + tested (refreshed 2026-07-18). The detailed design notes
+below were consolidated here from the retired `MULTI_SOURCE_ARCHITECTURE.md`.
+
+Goal: stop hard-coding *which provider* each analyst calls. Instead, let each
+data **domain** (e.g. `news_sentiment`, `option_chain`) be served by one-or-many
+pluggable **sources** in different layouts, and let an analyst **weigh all
+candidate sources** instead of trusting a single one. This kills vendor lock-in
+and widens the evidence base (Sentiment reads Yahoo + Finnhub; Options reads
+Massive/Polygon + CBOE; Fundamentals reads Alpha Vantage + a second provider).
+
+### Hard-wiring audit (what the code did before the rework)
+
+Every provider call was a bespoke function with the endpoint URL + provider-
+specific parse inlined at the call site, bypassing the `acquire()` engine.
+
+| Data needed by analyst        | Old call site (hard-wired)                                  | Endpoint (inlined)                                  | Fallback (old)                          |
+|-------------------------------|-------------------------------------------------------------|-----------------------------------------------------|-----------------------------------------|
+| Price bars (technical/options)| `hist.fetchPriceBars` `src/registry/logic/hist.ts`          | `YAHOO_CHART(...)` (Yahoo chart API)                | deterministic mock (`source:'mock'`)    |
+| Option chain (options/greeks) | `resolveLiveOptionsBundle` → `acquireOptionChain` (`adapters/option-chain.ts`) | `api.massive.com/v3/snapshot/options/{ticker}` | `fetchCboeOptionChain` (CDN, keyless), then mock |
+| Fundamentals (fundamental)    | `fetchRealFinancialData` → `fetchAlphaVantageOverview` (`adapters/alphavantage-fundamentals.ts`) | `alphavantage.co/query?function=OVERVIEW` | seeded random balance sheet |
+| News/sentiment (sentiment)    | `news.fetchCompanyNews` `src/registry/logic/news.ts`        | Finnhub `finnhub.io/api/v1/company-news`            | Yahoo → Google News RSS → synthetic mock (already fan-in!) |
+| Risk-free rate (options)      | Treasury feed (keyless)                                     | `api.fiscaldata.treasury.gov/...avg_interest_rates` | n/a (auth:'none')                       |
+
+The one bright spot: `news.ts` already fans out Finnhub → Yahoo → Google → mock
+and merges — the exact pattern this rework generalizes into a first-class layer.
+
+### Provider-agnostic primitives that already existed (and were reused)
+
+- **`DataSourceSpec`** (`src/types/registry.ts`) — one source entry: `id`,
+  `endpoint`, `auth` (`none|bearer|apikey|finnhub`), `fields`, `okPath`,
+  `healthQuery`/`healthFields`, `timeoutMs`, `retries`, `required`,
+  `onError` (`skip|degrade|fallback|fail`), `fallbackSourceId`.
+- **`acquireSource()`** (`src/registry/sources/acquire.ts`) — fetches ONE source
+  with timeout/retry/non-retryable 401-403 fast-fail/429 backoff/schema
+  validation; returns `AcquireResult { id, ok, status, data, reason, authError }`.
+- **`acquireForAnalyst()`** (`src/registry/sources/index.ts`) — runs ALL of an
+  analyst's declared `dataSources`, applies per-source `onError` policy, resolves
+  `fallbackSourceId` chains, and returns `merged` keyed by **source id**, plus
+  `sourceStatus`, `degraded`, `usedMockFallback`, `hardFailed`, `authError`. Already
+  supports multiple sources per analyst.
+- **`aggregateDataHealth()`** (`src/registry/sources/index.ts`) — pipeline summary
+  (`sourcesOk`, `sourcesTotal`, `degradedAnalysts`, `unavailableSources`).
+- **`DEFAULT_SOURCE_URIS`** (`src/registry/analyst-config-schema.ts`) — canonical
+  base-URI catalog (alphaVantage, finnhub, polygonOptions, polygonHist,
+  treasuryRfr). Add a source → add a row here.
+- **Settings UI / [Test] probe** — already source-driven off `DataSourceSpec`
+  (base URI + token), so a new source is configurable in the UI for free.
+
+Conclusion: the transport was swappable *before* the rework. The gap was that
+call sites still called providers directly, and acquisition output was **not
+normalized or weighed** before an analyst consumed it.
+
+### Target architecture (3 layers)
+
+```
+   Analyst handler (sentiment/technical/fundamental/risk/options)
+        │  declares: needs DOMAIN "sentiment"  (NOT "finnhub")
+        ▼
+   ┌───────────────────────────────────────────────────────────┐
+   │ FAN-IN / WEIGHTING layer  (NEW)                            │
+   │  for each required domain:                                │
+   │   1. select candidate sources for (domain, ticker)        │
+   │   2. acquire each via existing acquireSource()            │
+   │   3. run each source payload through its Adapter → canonical│
+   │   4. collect N normalized records                         │
+   │   5. pass ALL records to the analyst, which WEIGHS them   │
+   └───────────────────────────────────────────────────────────┘
+        ▼                      ▼                      ▼
+   ┌─────────────┐      ┌─────────────┐       ┌─────────────┐
+   │ Adapter:    │      │ Adapter:    │       │ Adapter:    │
+   │ Yahoo       │      │ Finnhub     │       │ AlphaVantage│   (NEW, one per provider)
+   └──────┬──────┘      └──────┬──────┘       └──────┬──────┘
+          ▼                    ▼                     ▼
+   ┌───────────────────────────────────────────────────────────┐
+   │ EXISTING acquisition engine  (acquireSource / acquireFor…) │
+   │ endpoint + auth + timeout + retry + validate + fallback    │
+   └───────────────────────────────────────────────────────────┘
+```
+
+**Data domains (the contract).** A `DataDomain` is a *typed need*, independent of
+any provider. Each analyst **requires** a set of domains; the config maps each
+domain to ≥1 source. Canonical shapes live in `src/registry/types/domains.ts`
+(`NormalizedRecord<T>` envelope, `DomainShapes`). Handler signature:
+`resolveDomain('sentiment', ticker, ctx) → NormalizedRecord[]` (a list, so it can
+weigh several).
+
+| Domain            | Canonical shape                       | Consumed by            | Candidate sources (today)                          |
+|-------------------|---------------------------------------|------------------------|----------------------------------------------------|
+| `price_bars`      | `PriceBar[]`                          | technical, options     | Yahoo → + Polygon aggregates, + AlphaVantage, IEX   |
+| `fundamentals`    | `KeyRatios`                           | fundamental            | AlphaVantage OVERVIEW → + FMP, Finnhub profile, SEC|
+| `news_sentiment`  | `NewsHeadline[]` + `sentiment_score`  | sentiment              | Finnhub → + Yahoo, Google, + social (P6)            |
+| `option_chain`    | `OptionQuote[]` + expiries + spot     | options, risk          | Massive/Polygon → + CBOE (fallback), Tradier, IEX   |
+| `risk_free_rate`  | `number` (annualized)                 | options (pricing)      | Treasury fiscaldata (keyless)                       |
+| `market_meta`     | beta, realized vol, mkt cap           | risk, fundamental      | derived from `price_bars`; provider-supplied opt.  |
+
+**Adapter (the swappable unit).** One `Adapter` per provider, registered in a
+catalog. It knows ONLY which `DataSourceSpec`(s) it fulfils and how to map that
+provider's response layout → the domain's canonical shape.
+
+```ts
+interface DomainAdapter {
+  sourceId: string;                 // matches DataSourceSpec.id
+  domain: DataDomain;
+  normalize(raw: any, ctx: AdaptCtx): NormalizedRecord;  // layout A → canonical
+  confidence?(raw: any): number;    // 0..1, used by weighting
+}
+```
+
+Moving the inline parse out of `hist.ts`/`data-ingestion.ts`/`news.ts` into
+adapters is what makes parse fixture-testable in isolation.
+
+**Fan-in + weighting (the analyst-facing change).** `resolveDomain(domain,
+ticker, sources, ctx)`: (1) acquire each candidate source via `acquireSource`,
+(2) run each ok payload through its adapter's `normalize`, (3) return
+`NormalizedRecord[]` (each tagged `sourceId`, `status`, `confidence`). The analyst
+then **weighs** the records: `score = Σ w_i·s_i` where `w_i` derives from
+`confidence × (1 + agreementBonus)`. Divergent sources emit a `low_consensus` note
+(honest provenance — matches the semantic-honesty bar in AGENT.md). Fusion core:
+`src/registry/logic/fuse.ts` (`fuseNumeric`, `fuseSentiment`).
+
+### Phased delivery status (all shipped, test-gated)
+
+| Phase | What it delivered | Status |
+|-------|-------------------|--------|
+| P0 | Domain contracts + typed `resolveDomain` (no behavior change); `src/registry/types/domains.ts`, `domains.p0.test.ts` (9 parity tests) | DONE — 65 suites / 570 pass |
+| P1 | Adapter registry + extract inline parse (Yahoo/Finnhub/AlphaVantage); `src/registry/sources/adapters/*`; `adapters.test.ts` (13) | DONE — 66 suites / 583 pass |
+| P2 | Multi-source per domain + config-driven weighting. P2a fusion core `fuse.ts` (12 tests); P2b backend fan-in (5 tests); P2b-2 frontend trace drawer (`MarketDataCard` consensus readout) | DONE — 68 suites / 600 pass; 39 FE files / 323 pass |
+| P3 | Swappable source config, no code change to switch providers. P3a backend `DOMAIN_SOURCES` + `enabledSources`; P3b Settings → **Data Sources** tab (`DomainSourcesTab.tsx`) + persistence (`domain-source-config.ts`) + routes | DONE — 68 suites / 610 pass |
+| P4 | Delete legacy hard-wired fetchers; relocate to `adapters/` (price-bars, option-chain, alphavantage-fundamentals). grep-guard satisfied (no provider URL outside `adapters/` + `DEFAULT_SOURCE_URIS`) | DONE — backend 616 pass / 1 skip; frontend 330 pass |
+
+P5 (docs) absorbed this section into the main architecture doc; P6 (social-domain
+sentiment) deferred — it falls out of the same adapter interface as a pure
+config + adapter addition.
+
+### Behavioral notes (lock-in contracts)
+
+- **CBOE fallback after a failed Massive/Polygon key (401).** When a
+  Massive/Polygon key is set but the live call returns a non-OK status (e.g. 401
+  entitlement-not-authorised), `acquireOptionChain` / `resolveLiveOptionsBundle`
+  MUST still fall back to the **free, keyless CBOE delayed feed** and return
+  `source === 'cboe'` — NOT a silent mock. Deterministic test:
+  `src/tests/options-cboe-fallback.test.ts` (3); live proof (gated by
+  `SKIP_NETWORK_TESTS=1`): `src/tests/options-cboe-fallback.repro.test.ts`.
+- **Sources tab: Massive/Polygon share ONE combined `[Test]` button.** In the
+  shared `SourcesTab` (`frontend/src/components/analysts/SourcesTab.tsx`), a key
+  group (`keyGroup: 'massive'`, `polygonOptions` + `polygonHist`) renders a SINGLE
+  shared token field + ONE combined `[Test Massive/Polygon Options endpoints]`
+  button at the bottom; the two endpoint inputs stay grouped (not split by a
+  per-endpoint Test button). The grouping is centralized in
+  `buildAnalystConfigSchema` (`analystConfigSchema.ts`, `withKeyGroups`), so **both**
+  the General Settings → Sources tab AND the **Data Ingestion analyst's** Settings
+  dialog render the identical layout. Tests: `SourcesTab.test.tsx` +
+  `sourceGearOpensDialog.test.tsx`.

@@ -173,11 +173,18 @@ describe('data_ingestion gear opens the unified tabbed Settings dialog', () => {
     // Data Ingestion's own sources are present...
     await waitFor(() => expect(screen.getByText('Alpha Vantage')).toBeTruthy());
     expect(screen.getByText('Finnhub')).toBeTruthy();
-    // ...AND Polygon Options / Aggregates (which live under options_ingestion)
-    // are now visible here too. Treasury RFR is auth:'none' (no key needed) so
-    // it is intentionally NOT in the credentialed catalog — it is fetched live
-    // directly from its hardcoded endpoint, with no UI entry.
-    expect(screen.getByText('Polygon Options')).toBeTruthy();
-    expect(screen.getByText('Polygon Aggregates')).toBeTruthy();
+    // ...AND the Polygon options/aggregates (which live under options_ingestion)
+    // are now visible here too, collapsed into ONE Massive/Polygon key group —
+    // the SAME layout as the General Settings → Sources tab: a single shared
+    // token field, both endpoints listed beneath it, and one combined [Test]
+    // button at the bottom (not two separate single-source rows each with its
+    // own Test button).
+    expect(screen.getByRole('heading', { name: /Massive\/Polygon Options/i })).toBeTruthy();
+    expect(screen.getByText('Options snapshot')).toBeTruthy();
+    expect(screen.getByText('Daily aggregates')).toBeTruthy();
+    // Exactly one combined Test button for the whole group (no per-endpoint buttons).
+    expect(screen.getByRole('button', { name: /Test Massive\/Polygon Options endpoints/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Test Polygon Options connection/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Test Polygon Aggregates connection/i })).toBeNull();
   });
 });

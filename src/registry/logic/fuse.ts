@@ -1,5 +1,5 @@
 // src/registry/logic/fuse.ts
-// P2a of the multi-source architecture (docs/MULTI_SOURCE_ARCHITECTURE.md §P2).
+// P2a of the multi-source architecture (docs/ARCHITECTURE.md §Multi-Source Data Architecture, P2).
 //
 // The PURE fusion engine: given several NormalizedRecord<T> for the SAME domain
 // (one per source), combine a numeric signal across them into a single weighted

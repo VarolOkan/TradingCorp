@@ -1,5 +1,5 @@
 // src/registry/types/domains.ts
-// P0 of the multi-source architecture (see docs/MULTI_SOURCE_ARCHITECTURE.md).
+// P0 of the multi-source architecture (see docs/ARCHITECTURE.md §Multi-Source Data Architecture).
 //
 // Declares the TYPED DATA-DOMAIN contract that analysts depend on, decoupled
 // from any provider. This file is PURE TYPE DEFINITIONS — no behaviour, no

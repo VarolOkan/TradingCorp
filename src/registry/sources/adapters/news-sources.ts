@@ -1,5 +1,5 @@
 // src/registry/sources/adapters/news-sources.ts
-// P4 (docs/MULTI_SOURCE_ARCHITECTURE.md §P4). The news_sentiment domain fans in
+// P4 (docs/ARCHITECTURE.md §Multi-Source Data Architecture, P4). The news_sentiment domain fans in
 // across three live feeds — Finnhub (keyed), Yahoo RSS (key-free), Google News
 // RSS (key-free). Their provider URLs moved here from news.ts so the legacy
 // logic file is URL-free (grep-guard compliant). Each builder is a pure function.
