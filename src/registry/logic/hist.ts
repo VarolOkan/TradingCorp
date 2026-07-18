@@ -33,10 +33,10 @@ import { logger } from '../../utils/logger';
 
 // P4: the price-bars + option-chain fetchers moved to adapters/{price-bars,option-chain}.ts.
 // hist.ts now owns ONLY the deterministic mock engine + the PURE parsers (no provider
-// URLs, no fetch orchestration). Type-only re-exports are erased at compile time, so
-// they create no runtime import cycle with the adapters.
-export type { PriceBarsResult, PriceBarsFetchFn } from '../sources/adapters/price-bars';
-export type { OptionChainFetchFn } from '../sources/adapters/option-chain';
+// URLs, no fetch orchestration). OptionChainResult + OptionChainFetchFn types
+// live in the adapter layer (../sources/adapters/option-chain) — imported type-only.
+import type { OptionChainFetchFn, OptionChainResult } from '../sources/adapters/option-chain';
+import type { PriceBarsResult, PriceBarsFetchFn } from '../sources/adapters/price-bars';
 
 /**
  * The shared seededRandom LCG can emit values outside [0,1) on its early calls
@@ -404,11 +404,6 @@ function isFiniteNum(v: any): boolean {
   return Number.isFinite(n);
 }
 
-export interface OptionChainResult extends OptionChain {
-  source: 'polygon' | 'yahoo' | 'cboe' | 'mock';
-  note?: string;
-}
-
 const YAHOO_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 
 /**
@@ -580,7 +575,7 @@ export function parseCboeOptions(ticker: string, payload: any): OptionChainResul
 
 /** PURE parser: Polygon v3 options snapshot payload → OptionQuote[].
  *  Accepts either the raw `results` object (v3 shape: { ticker, underlying_asset,
- *  options: [...] }) or the bare options array. Extracted from fetchOptionChain
+ *  options: [...] }) or the bare options array. Extracted from acquireOptionChain
  *  so the §4.9 acquisition engine (which may have already fetched + validated the
  *  snapshot) can reuse the exact same parsing without re-fetching. Returns null
  *  when the payload is unusable. */

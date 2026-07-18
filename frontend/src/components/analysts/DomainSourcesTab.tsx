@@ -60,8 +60,11 @@ export const DomainSourcesTab = forwardRef<DomainSourcesTabHandle, DomainSources
         const res: DomainSourcesResponse = await getDomainSources();
         setData(res.domains);
         // Seed the draft from the engine's CURRENT enabled list per domain.
+        // Defensive: a domain missing `enabled` must not crash the render.
         const seed: Record<string, string[]> = {};
-        for (const [d, v] of Object.entries(res.domains)) seed[d] = v.enabled.slice();
+        for (const [d, v] of Object.entries(res.domains)) {
+          seed[d] = Array.isArray(v?.enabled) ? v.enabled.slice() : [];
+        }
         setDraft(seed);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -121,7 +124,7 @@ export const DomainSourcesTab = forwardRef<DomainSourcesTabHandle, DomainSources
     if (!data) return null;
 
     const dirty = Object.keys(data).some((d) => {
-      const cur = data[d].enabled;
+      const cur = data[d]?.enabled ?? [];
       const next = draft[d] ?? [];
       return cur.length !== next.length || cur.some((s, i) => s !== next[i]);
     });
@@ -136,13 +139,15 @@ export const DomainSourcesTab = forwardRef<DomainSourcesTabHandle, DomainSources
         </p>
         {error && <p className="settings-error" role="alert">{error}</p>}
         {Object.entries(data).map(([domain, view]) => {
+          const view0 = view ?? ({} as DomainSourceView);
+          const available = Array.isArray(view0.available) ? view0.available : [];
           const enabled = draft[domain] ?? [];
           const degraded = enabled.length === 0;
           return (
             <fieldset key={domain} className="settings-group" disabled={saving}>
               <legend>
                 {DOMAIN_LABELS[domain] ?? domain}
-                {view.overridden && (
+                {view0.overridden && (
                   <span className="source-chip" aria-label="customized">custom</span>
                 )}
                 {degraded && (
@@ -162,7 +167,7 @@ export const DomainSourcesTab = forwardRef<DomainSourcesTabHandle, DomainSources
                 </p>
               )}
               <div className="domain-source-list">
-                {view.available.map((src) => {
+                {available.map((src) => {
                   const on = isEnabled(domain, src);
                   const order = enabled.indexOf(src);
                   return (
@@ -208,7 +213,7 @@ export const DomainSourcesTab = forwardRef<DomainSourcesTabHandle, DomainSources
                 })}
               </div>
               <p className="settings-hint">
-                {enabledCount(domain)} of {view.available.length} enabled
+                {enabledCount(domain)} of {available.length} enabled
                 {enabledCount(domain) > 0 && (
                   <> · order: {enabled.join(' › ')}</>
                 )}

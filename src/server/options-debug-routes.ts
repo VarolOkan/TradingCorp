@@ -40,7 +40,7 @@ export function registerOptionsDebugRoutes(app: Express): void {
       });
     }
 
-    // 2) Reproduce the live call with Bearer auth (matches the tab's fetchOptionChain).
+    // 2) Reproduce the live call with Bearer auth (matches the tab's acquireOptionChain).
     const url = MASSIVE_SNAPSHOT(symbol);
     const headers = { Accept: 'application/json', Authorization: `Bearer ${effectiveKey}` };
     steps.push({ step: 'liveCall', url, auth: 'Bearer', apiKeyParam: false });

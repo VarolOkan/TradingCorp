@@ -3,7 +3,7 @@
 //
 // `resolveDomain(domain, ticker, ctx)` is the SINGLE entry point analysts will
 // use to get data. In P0 it is a PARITY-PRESERVING wrapper: it calls the
-// EXISTING single-source functions (fetchPriceBars, fetchOptionChain,
+// EXISTING single-source functions (acquirePriceBars, acquireOptionChain,
 // fetchCompanyNews, fetchRealFinancialData, acquireSource+parseTreasuryRfr) and
 // wraps each result in a ONE-ELEMENT `NormalizedRecord<T>[]`.
 //

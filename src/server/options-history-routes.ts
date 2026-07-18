@@ -5,7 +5,7 @@
 //
 // P4: funnelled through resolveDomain('option_chain'). The response shape is
 // preserved: resolveDomain records the raw fetcher result as `data`, so we
-// return `record[0].data` (== the old fetchOptionChain(...) payload).
+// return `record[0].data` (== the raw acquireOptionChain(...) payload).
 //
 // KEY RESOLUTION (bugfix preserved): the option chain key the user enters in the
 // Settings UI is stored in the ENCRYPTED VAULT under (analystId
@@ -15,7 +15,7 @@
 // Env var stays as a fallback.
 import type { Express } from 'express';
 import { resolveDomain } from '../registry/logic/domains';
-import type { OptionChainFetchFn } from '../registry/logic/hist';
+import type { OptionChainFetchFn } from '../registry/sources/adapters/option-chain';
 import { analystConfigStore } from './analyst-config';
 
 export function registerOptionsHistoryRoutes(app: Express, fetchFn?: OptionChainFetchFn): void {

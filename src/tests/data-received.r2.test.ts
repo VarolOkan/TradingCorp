@@ -52,7 +52,7 @@ describe('Phase R2 — equity handlers record dataReceived', () => {
     const domains = e.blocks.map((b: any) => b.domain);
     expect(domains).toContain('bars');
     expect(domains).toContain('market');
-    // In this sandbox fetchPriceBars falls back to the deterministic mock
+    // In this sandbox acquirePriceBars falls back to the deterministic mock
     // (no global fetch), so provenance is 'mock'; with live keys it would be
     // 'live' / 'mixed'. Both are valid — the annotation just reflects reality.
     expect(['live', 'mock', 'mixed']).toContain(e.provenance);

@@ -3,7 +3,7 @@
 // acquisition logic out of the legacy hist.ts fetcher and into the adapter layer
 // (allow-listed by the grep guard — every provider URL now lives in `adapters/`
 // or `DEFAULT_SOURCE_URIS`). The PARSE half is the shared `yahooPriceAdapter`;
-// the TRANSPORT+fallback half mirrors the original `fetchPriceBars` exactly so
+// the TRANSPORT+fallback half mirrors the original `acquirePriceBars` exactly so
 // behavior is byte-for-byte identical (verified by domains.p0.test.ts).
 //
 // NOTE: we deliberately call `doFetch` directly + feed the FULL payload to the
@@ -91,4 +91,31 @@ export async function acquirePriceBars(
     source: 'mock',
     note: 'Live price history unavailable — showing deterministic mock bars.',
   };
+}
+
+/**
+ * Fetch a raw Yahoo chart result (`chart.result[0]`) for one (range, interval)
+ * without parsing. P4: the Yahoo chart URL moved here from data-ingestion.ts so
+ * the ingestion orchestrator no longer hard-wires any provider URL (grep-guard
+ * compliant). Returns the raw `r` object, or null when Yahoo is unreachable.
+ */
+export async function acquireYahooChartRaw(
+  ticker: string,
+  range: string,
+  interval: BarInterval,
+  fetchFn?: PriceBarsFetchFn,
+): Promise<any | null> {
+  const doFetch =
+    fetchFn ?? ((globalThis as any).fetch?.bind?.(globalThis) as PriceBarsFetchFn | undefined);
+  if (typeof doFetch !== 'function') return null;
+  try {
+    const res = await doFetch(YAHOO_CHART(ticker.trim().toUpperCase(), range, interval));
+    if (res.ok) {
+      const payload = await res.json().catch(() => null);
+      return payload?.chart?.result?.[0] ?? null;
+    }
+  } catch {
+    /* fall through to null */
+  }
+  return null;
 }

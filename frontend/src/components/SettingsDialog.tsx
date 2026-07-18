@@ -7,7 +7,8 @@
 //   - Server Log: live tail of logs/server.log
 // Tokens are sent to the server but never logged or echoed (hasToken chip only).
 
-import { useState, useEffect, FormEvent, Fragment, useRef, useMemo } from 'react';
+import { useState, useEffect, FormEvent, Fragment, useRef, useMemo, Component } from 'react';
+import type { ReactNode } from 'react';
 import { postSettings } from '../api/configClient';
 import { getLlmConfig, postLlmConfig, postLlmConfigTest, type LlmModelConfigPublic } from '../api/llmConfigClient';
 import {
@@ -68,6 +69,42 @@ const ROLE_LABELS: Record<LlmRole, string> = {
   scanner: 'Scanner',
   flexible: 'Flexible',
 };
+
+/**
+ * Safety net: a render-time crash in any settings tab must NOT unmount the whole
+ * React root (which would black out the entire app). Without an error boundary,
+ * an exception thrown during render propagates to the root and React tears down
+ * every mounted component. This boundary catches it and shows a visible,
+ * recoverable error panel instead — the user can close the dialog and keep using
+ * the app.
+ */
+class TabErrorBoundary extends Component<
+  { children: ReactNode; label?: string },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error) {
+    // Surface the real cause for triage; the UI stays usable.
+    console.error('[SettingsDialog] tab render crashed:', error);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="settings-error" role="alert" data-testid="tab-render-error">
+          <strong>{this.props.label ?? 'This settings tab'} failed to render.</strong>
+          <pre className="settings-error-detail">{String(this.state.error?.message ?? this.state.error)}</pre>
+          <button type="button" className="link-btn" onClick={() => this.setState({ error: null })}>
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export function SettingsDialog({
   open,
@@ -848,6 +885,7 @@ export function SettingsDialog({
           </button>
         </div>
 
+        <TabErrorBoundary label="This settings tab">
         {tab === 'connection' && (
           <form onSubmit={handleConnSubmit}>
             <h2>Connection Settings</h2>
@@ -1776,7 +1814,6 @@ export function SettingsDialog({
               <button
                 type="button"
                 data-testid="domains-save"
-                disabled={saving}
                 onClick={async () => {
                   const ok = await domainSourcesRef.current?.save();
                   if (ok) onClose();
@@ -1819,6 +1856,7 @@ export function SettingsDialog({
             </pre>
           </div>
         )}
+        </TabErrorBoundary>
       </div>
     </div>
   );

@@ -63,3 +63,30 @@ export const alphaVantageFundamentalsAdapter: SourceAdapter<'fundamentals'> = {
     return normalizeAvOverview(raw);
   },
 };
+
+/**
+ * Fetch + parse the Alpha Vantage OVERVIEW endpoint for one ticker.
+ * P4: the AV URL moved here from data-ingestion.ts (grep-guard compliant).
+ * Returns the normalized fundamentals payload, or null when no key / fetch /
+ * live response is available so the caller can fall back to seeded data.
+ */
+export async function acquireAlphaVantageOverview(
+  ticker: string,
+  opts: { fetchFn?: (url: string) => Promise<any>; apiKey?: string } = {},
+): Promise<Record<string, any> | null> {
+  const fetchFn = opts.fetchFn;
+  if (!opts.apiKey || typeof fetchFn !== 'function') return null;
+  try {
+    const url = `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(
+      ticker.toUpperCase(),
+    )}&apikey=${encodeURIComponent(opts.apiKey)}`;
+    const res = await fetchFn(url);
+    if (res && res.ok) {
+      const j = (await res.json().catch(() => ({} as any))) as any;
+      return normalizeAvOverview(j);
+    }
+  } catch {
+    /* fall through to null → seeded fallback */
+  }
+  return null;
+}

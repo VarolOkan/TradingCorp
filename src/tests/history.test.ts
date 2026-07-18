@@ -1,7 +1,7 @@
 // src/tests/history.test.ts
 // Phase I (historical quotes): real OHLCV bars from Yahoo, mock fallback.
 import { registerHistoryRoutes } from '../server/history-routes';
-import { acquirePriceBars as fetchPriceBars } from '../registry/sources/adapters/price-bars';
+import { acquirePriceBars } from '../registry/sources/adapters/price-bars';
 import express from 'express';
 import type { Server } from 'http';
 import request from 'supertest';
@@ -37,10 +37,10 @@ const yahooChart = (over: any = {}) => ({
   },
 });
 
-describe('fetchPriceBars (Phase I)', () => {
+describe('acquirePriceBars (Phase I)', () => {
   it('maps Yahoo chart JSON to PriceBar[] with source yahoo', async () => {
     const fetchFn = async () => ({ ok: true, status: 200, json: async () => yahooChart() });
-    const r = await fetchPriceBars('aapl', { interval: '1d', lookbackDays: 90, fetchFn });
+    const r = await acquirePriceBars('aapl', { interval: '1d', lookbackDays: 90, fetchFn });
     expect(r.source).toBe('yahoo');
     expect(r.ticker).toBe('AAPL');
     expect(r.bars.length).toBe(3);
@@ -56,7 +56,7 @@ describe('fetchPriceBars (Phase I)', () => {
       json: async () =>
         yahooChart({ quote: { open: [null, 101, 102], high: [null, 104, 105], low: [null, 100, 101], close: [null, 102, 103], volume: [null, 1100, 1200] } }),
     });
-    const r = await fetchPriceBars('AAPL', { fetchFn });
+    const r = await acquirePriceBars('AAPL', { fetchFn });
     expect(r.source).toBe('yahoo');
     expect(r.bars.length).toBe(2); // first null-padded bar skipped
   });
@@ -65,7 +65,7 @@ describe('fetchPriceBars (Phase I)', () => {
     const fetchFn = async () => {
       throw new Error('ENOTFOUND');
     };
-    const r = await fetchPriceBars('AAPL', { fetchFn });
+    const r = await acquirePriceBars('AAPL', { fetchFn });
     expect(r.source).toBe('mock');
     expect(r.bars.length).toBeGreaterThan(0);
     expect(r.note).toContain('unavailable');
@@ -73,19 +73,19 @@ describe('fetchPriceBars (Phase I)', () => {
 
   it('falls back to mock when Yahoo returns a non-ok status', async () => {
     const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
-    const r = await fetchPriceBars('AAPL', { fetchFn });
+    const r = await acquirePriceBars('AAPL', { fetchFn });
     expect(r.source).toBe('mock');
   });
 
   it('falls back to mock when no fetchFn is supplied', async () => {
-    const r = await fetchPriceBars('AAPL');
+    const r = await acquirePriceBars('AAPL');
     expect(r.source).toBe('mock');
     expect(r.bars.length).toBeGreaterThan(0);
   });
 
   it('Phase 22: 1h and 4h mock bars are spaced at the correct step (honest, not mislabeled 1m)', async () => {
-    const h1 = await fetchPriceBars('AAPL', { interval: '1h', lookbackDays: 2 });
-    const h4 = await fetchPriceBars('AAPL', { interval: '4h', lookbackDays: 2 });
+    const h1 = await acquirePriceBars('AAPL', { interval: '1h', lookbackDays: 2 });
+    const h4 = await acquirePriceBars('AAPL', { interval: '4h', lookbackDays: 2 });
     expect(h1.source).toBe('mock');
     expect(h4.source).toBe('mock');
     // 1h step = 3,600,000 ms; 4h step = 14,400,000 ms.

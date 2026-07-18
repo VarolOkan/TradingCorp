@@ -13,6 +13,7 @@
 //   -> synthetic seeded headlines (last resort, no network).
 
 import { finnhubNewsAdapter } from '../sources/adapters/finnhub-news';
+import { finnhubNewsUrl, yahooNewsRssUrl, googleNewsRssUrl } from '../sources/adapters/news-sources';
 
 export interface NewsHeadline {
   title: string;
@@ -127,28 +128,6 @@ export function scoreToLabel(score: number): NewsHeadline['sentiment'] {
   if (score >= -20) return 'NEUTRAL';
   if (score >= -60) return 'NEGATIVE';
   return 'VERY_NEGATIVE';
-}
-
-function finnhubUrl(ticker: string, key: string): string {
-  // from = 30 days back so the feed is fresh but bounded.
-  const from = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const to = new Date().toISOString().slice(0, 10);
-  return `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}&token=${key}`;
-}
-
-// Yahoo Finance RSS headline feed — a live, key-free feed that returns REAL
-// article URLs (finance.yahoo.com/...html). Unlike the dead /v1/finance/news
-// JSON endpoint (HTTP 500 without auth), this one works from the server and
-// lets us extract a genuine story preview. Used as the primary no-key source.
-function yahooNewsUrl(ticker: string): string {
-  return `https://finance.yahoo.com/news/rss/headline/?symbols=${encodeURIComponent(ticker)}`;
-}
-
-// Google News search feed (RSS) — a published, key-free feed. Headlines link to
-// Google redirect URLs that resolve to the actual publisher story. Second
-// fallback after Yahoo.
-function googleNewsRssUrl(ticker: string): string {
-  return `https://news.google.com/rss/search?q=${encodeURIComponent(ticker)}&hl=en-US&gl=US&ceid=US:en`;
 }
 
 // Pull the opening 1-2 sentences of an article page so the News tab can show a
@@ -308,7 +287,7 @@ export async function fetchCompanyNews(
   // 1) Finnhub (key required).
   if (key && typeof doFetch === 'function') {
     try {
-      const res = await doFetch(finnhubUrl(ticker, key));
+      const res = await doFetch(finnhubNewsUrl(ticker, key));
       if (res.ok) {
         const payload = await res.json().catch(() => null);
         // P1: parse delegated to the Finnhub news adapter (pure, fixture-tested).
@@ -327,7 +306,7 @@ export async function fetchCompanyNews(
   let yahooHeadlines: NewsHeadline[] = [];
   if (typeof doFetch === 'function') {
     try {
-      const res = await doFetch(yahooNewsUrl(ticker));
+      const res = await doFetch(yahooNewsRssUrl(ticker));
       if (res.ok) {
         const xml = typeof res.text === 'function' ? await res.text() : '';
         const items = xml.split('<item>').slice(1);

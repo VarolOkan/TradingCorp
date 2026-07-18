@@ -8,10 +8,10 @@
 // layer (swappable sources, honest degrade, fan-in) is the single entry point.
 // The response shape is preserved byte-for-byte: resolveDomain records the raw
 // fetcher result as `data`, so we return `record[0].data` (== the old
-// fetchPriceBars(...) payload the frontend consumes).
+// acquirePriceBars(...) payload the frontend consumes).
 import type { Express } from 'express';
 import { resolveDomain } from '../registry/logic/domains';
-import type { PriceBarsFetchFn } from '../registry/logic/hist';
+import type { PriceBarsFetchFn } from '../registry/sources/adapters/price-bars';
 
 export function registerHistoryRoutes(app: Express, fetchFn?: PriceBarsFetchFn): void {
   app.get('/history', async (req, res) => {
@@ -32,7 +32,7 @@ export function registerHistoryRoutes(app: Express, fetchFn?: PriceBarsFetchFn):
         fetchFn: ctxFetch,
         profile: { intervals: [interval as '1d'], lookbackDays } as any,
       });
-      // record[0].data IS the raw fetcher result (fetchPriceBars payload).
+      // record[0].data IS the raw fetcher result (acquirePriceBars payload).
       return res.json((rec as any)?.data ?? null);
     } catch (err) {
       return res.status(502).json({

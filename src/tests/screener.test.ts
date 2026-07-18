@@ -2,7 +2,7 @@
 // Phase 6: the screener is fast, deterministic, and agency-aware.
 import { screenTickers, resolveAgencyWeights, resolveScreenerProfile, resolveScreenerInstrument, technicalPromiseScore, stabilityScore, DEFAULT_UNIVERSE } from '../registry/logic/screener';
 import { AGENCIES } from '../registry/agencies';
-import type { PriceBarsFetchFn } from '../registry/logic/hist';
+import type { PriceBarsFetchFn } from '../registry/sources/adapters/price-bars';
 import type { NewsFetchFn } from '../registry/logic/news';
 
 // Deterministic fake price source: each ticker gets a fixed zig-zag series so
@@ -287,7 +287,7 @@ describe('screener — screenTickers', () => {
     // is observable. Volume values are the bars' volume field (mean across bars).
     const volByTicker: Record<string, number> = { BIG: 9_000_000, MID: 2_000_000, TINY: 50_000 };
     const volPriceFetch: PriceBarsFetchFn = async (url: string) => {
-      // fetchPriceBars builds `…/chart/<SYMBOL>` (path param), so pull it from
+      // acquirePriceBars builds `…/chart/<SYMBOL>` (path param), so pull it from
       // the trailing path segment, not a query string.
       const m = String(url).match(/\/chart\/([A-Z.]+)/i) ?? String(url).match(/symbol=([A-Z.]+)/i);
       const sym = (m?.[1] ?? 'AAPL').toUpperCase();

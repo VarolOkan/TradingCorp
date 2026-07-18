@@ -4,7 +4,7 @@
 // consistent with the chain (BS(mid) ≈ mid, since both come from greeks.ts).
 
 import { generateMockBundle, fetchHistoricalBundle, parseYahooOptions, parseCboeOptions } from './hist';
-import { fetchOptionChain, resolveLiveOptionsBundle } from '../sources/adapters/option-chain';
+import { acquireOptionChain, resolveLiveOptionsBundle } from '../sources/adapters/option-chain';
 import { bsPrice } from './greeks';
 
 describe('hist — mock bundle structure', () => {
@@ -161,7 +161,7 @@ function yahooFetchFn() {
 
 describe('hist — options: real (delayed) Yahoo preferred over MOCK', () => {
   it('uses Yahoo (source:"yahoo") when a transport is injected but no POLYGON_API_KEY', async () => {
-    const res = await fetchOptionChain('AAPL', { fetchFn: yahooFetchFn() });
+    const res = await acquireOptionChain('AAPL', { fetchFn: yahooFetchFn() });
     expect(res.source).toBe('yahoo');
     expect(res.underlying_price).toBeCloseTo(225.43, 2);
     expect(res.quotes.length).toBeGreaterThan(0);
@@ -222,7 +222,7 @@ describe('hist — options: real (delayed) Yahoo preferred over MOCK', () => {
     const prev = (globalThis as any).fetch;
     (globalThis as any).fetch = undefined;
     try {
-      const res = await fetchOptionChain('AAPL');
+      const res = await acquireOptionChain('AAPL');
       expect(res.source).toBe('mock');
     } finally {
       (globalThis as any).fetch = prev;
@@ -247,7 +247,7 @@ describe('hist — options: real (delayed) Yahoo preferred over MOCK', () => {
     expect(calls).toContain(225);
   });
 
-  it('fetchOptionChain anchors the MOCK chain on the real Yahoo chart price when options is 429', async () => {
+  it('acquireOptionChain anchors the MOCK chain on the real Yahoo chart price when options is 429', async () => {
     const chartPayload = {
       chart: {
         result: [
@@ -264,7 +264,7 @@ describe('hist — options: real (delayed) Yahoo preferred over MOCK', () => {
       if (url.includes('options')) return { ok: false, status: 429, json: async () => ({}) } as any;
       return { ok: false, status: 404, json: async () => ({}) } as any;
     };
-    const res = await fetchOptionChain('SOFI', { fetchFn: fakeFetch as any });
+    const res = await acquireOptionChain('SOFI', { fetchFn: fakeFetch as any });
     expect(res.source).toBe('mock');
     expect(res.underlying_price).toBeCloseTo(18, 2);
     const calls = Array.from(new Set(res.quotes.filter((q) => q.type === 'C').map((q) => q.strike))).sort((a, c) => a - c);
@@ -395,7 +395,7 @@ describe('parseCboeOptions (free delayed feed)', () => {
   });
 });
 
-describe('fetchOptionChain CBOE fallback', () => {
+describe('acquireOptionChain CBOE fallback', () => {
   it('uses CBOE real data when a Massive key is set but the live call is entitlement-blocked (401)', async () => {
     const fakeFetch = async (url: string) => {
       if (url.includes('api.massive.com')) {
@@ -410,7 +410,7 @@ describe('fetchOptionChain CBOE fallback', () => {
       }
       return { ok: false, status: 404, text: async () => '', json: async () => ({}) } as any;
     };
-    const res = await fetchOptionChain('NVDA', { apiKey: 'some-key', fetchFn: fakeFetch as any });
+    const res = await acquireOptionChain('NVDA', { apiKey: 'some-key', fetchFn: fakeFetch as any });
     expect(res.source).toBe('cboe'); // real delayed data, NOT mock
     expect(res.quotes.length).toBeGreaterThan(0);
     expect(res.note).toContain('CBOE');

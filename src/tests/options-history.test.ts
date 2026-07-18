@@ -1,7 +1,7 @@
 // src/tests/options-history.test.ts
 // Phase I (options historical chains): real Polygon chain + mock fallback.
 import { registerOptionsHistoryRoutes } from '../server/options-history-routes';
-import { fetchOptionChain } from '../registry/sources/adapters/option-chain';
+import { acquireOptionChain } from '../registry/sources/adapters/option-chain';
 import express from 'express';
 import request from 'supertest';
 
@@ -38,7 +38,7 @@ const polygonSnapshot = (over: any = {}) => ({
   },
 });
 
-// Response-like stub returning BOTH text (what fetchOptionChain now reads
+// Response-like stub returning BOTH text (what acquireOptionChain now reads
 // first) and json, so the live parse path works regardless of which the
 // code consumes.
 function okRes(snapshot: any, status = 200) {
@@ -50,10 +50,10 @@ function errRes(status: number, body: any = {}) {
   return { ok: false, status, text: async () => t, json: async () => body };
 }
 
-describe('fetchOptionChain (Phase I)', () => {
+describe('acquireOptionChain (Phase I)', () => {
   it('maps a Polygon snapshot into OptionQuote[] with source polygon', async () => {
     const fetchFn = async () => okRes(polygonSnapshot());
-    const r = await fetchOptionChain('aapl', { apiKey: 'demo', fetchFn });
+    const r = await acquireOptionChain('aapl', { apiKey: 'demo', fetchFn });
     expect(r.source).toBe('polygon');
     expect(r.ticker).toBe('AAPL');
     expect(r.underlying_price).toBe(190.5);
@@ -66,7 +66,7 @@ describe('fetchOptionChain (Phase I)', () => {
   });
 
   it('falls back to deterministic mock when no API key is supplied', async () => {
-    const r = await fetchOptionChain('AAPL');
+    const r = await acquireOptionChain('AAPL');
     expect(r.source).toBe('mock');
     expect(r.quotes.length).toBeGreaterThan(0);
     expect(r.note).toContain('No POLYGON_API_KEY');
@@ -74,13 +74,13 @@ describe('fetchOptionChain (Phase I)', () => {
 
   it('falls back to mock when Polygon returns a non-ok status', async () => {
     const fetchFn = async () => errRes(429);
-    const r = await fetchOptionChain('AAPL', { apiKey: 'demo', fetchFn });
+    const r = await acquireOptionChain('AAPL', { apiKey: 'demo', fetchFn });
     expect(r.source).toBe('mock');
   });
 
   it('falls back to mock when the payload has no results', async () => {
     const fetchFn = async () => okRes({ results: { results: [] } });
-    const r = await fetchOptionChain('AAPL', { apiKey: 'demo', fetchFn });
+    const r = await acquireOptionChain('AAPL', { apiKey: 'demo', fetchFn });
     expect(r.source).toBe('mock');
   });
 });
@@ -119,7 +119,7 @@ describe('GET /options-history route (Phase I)', () => {
       { sessionId: 'default', analystId: 'options_ingestion', sourceId: 'polygonOptions' },
       { token: 'vault-massive-key' },
     );
-    // Stub the global fetch fetchOptionChain uses when no fetchFn is injected;
+    // Stub the global fetch acquireOptionChain uses when no fetchFn is injected;
     // assert the vault key reached the outgoing request as a Bearer header
     // (the auth scheme the [Test] probe + engine use — NOT a ?apiKey= param,
     // which Massive rejects) and the URL is the bare api.massive.com endpoint.

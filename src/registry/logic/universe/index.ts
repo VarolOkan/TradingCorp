@@ -174,7 +174,7 @@ export async function getUniverse(
     //      the live universe (it's the broad pool, not the fallback), but mark
     //      it as unpriced so the UI knows the gates didn't apply.
     // Either way: ship the LIVE pool as unpriced pseudo-quotes so the per-ticker
-    // fetchPriceBars path in screenTickers can still score them.
+    // acquirePriceBars path in screenTickers can still score them.
     const live = symbols.map((s) => ({
       ticker: s.ticker,
       price: 0,

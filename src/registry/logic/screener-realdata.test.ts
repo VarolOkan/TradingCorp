@@ -3,7 +3,7 @@
 // uses an injected fetchFn that returns yahoo-shaped payloads, and asserts
 // the per-ticker source + the aggregate dataSource badge are correct.
 import { screenTickers } from './screener';
-import type { PriceBarsFetchFn } from './hist';
+import type { PriceBarsFetchFn } from '../sources/adapters/price-bars';
 import type { NewsFetchFn } from './news';
 
 // Yahoo chart-shaped payload (v8/finance/chart).

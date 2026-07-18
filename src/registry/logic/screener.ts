@@ -19,7 +19,7 @@
 // fully unit-testable with injected fetch fns (no network needed).
 
 import { resolveDomain } from './domains';
-import type { PriceBarsFetchFn, PriceBarsResult } from './hist';
+import type { PriceBarsFetchFn, PriceBarsResult } from '../sources/adapters/price-bars';
 import { fetchCompanyNews, scoreHeadline, type NewsFetchFn } from './news';
 import { AGENCIES } from '../agencies';
 import { getUniverse, type UniverseTrace } from './universe';
@@ -275,7 +275,7 @@ async function evaluateTicker(
 ): Promise<ScreenerRow> {
   // P4: price bars now funnelled through resolveDomain('price_bars') so the
   // multi-source layer (swappable sources, honest degrade) is the single entry.
-  // record[0].data === the raw fetchPriceBars result (bars + source), so the
+  // record[0].data === the raw acquirePriceBars result (bars + source), so the
   // downstream `barsRes.bars` shape is preserved byte-for-byte.
   const ctxFetch = opts.fetchFn ? ((url: string) => (opts.fetchFn as any)(url)) as any : undefined;
   const [barsRec] = await resolveDomain('price_bars', ticker, {

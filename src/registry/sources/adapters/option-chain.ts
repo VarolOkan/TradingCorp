@@ -6,7 +6,7 @@
 // / parsePolygonChainResults) and the deterministic mock fallback (generateMockBundle)
 // stay in hist.ts as shared utils; this file owns the TRANSPORT + fallback orchestration.
 //
-// Behavior is byte-for-byte identical to the legacy `hist.fetchOptionChain`
+// Behavior is byte-for-byte identical to the original `hist.acquireOptionChain`
 // (verified by domains.p0.test.ts + options-history.test.ts + hist.test.ts).
 
 import {
@@ -36,7 +36,7 @@ export interface OptionChainResult extends OptionChain {
   note?: string;
 }
 
-// Backward-compat alias: legacy callers + tests import `fetchOptionChain`.
+// Backward-compat alias removed: callers + tests now import `acquireOptionChain`.
 // (Self-alias within the adapter — no import cycle.)
 
 // Provider URLs now live in the adapter layer (grep-guard compliant).
@@ -168,7 +168,7 @@ async function fetchYahooWithRetry(gf: (u: string, i?: any) => Promise<any>, url
  * to the deterministic seeded `generateMockBundle` chain when no transport / key
  * and all free feeds are unreachable (parity-safe).
  *
- * Behavior is byte-for-byte identical to the legacy `hist.fetchOptionChain`.
+ * Behavior is byte-for-byte identical to the original `hist.fetchOptionChain`.
  */
 export async function acquireOptionChain(
   ticker: string,
@@ -272,9 +272,6 @@ export async function acquireOptionChain(
       : 'Live option chain unavailable — showing deterministic mock chain.',
   };
 }
-
-/** Backward-compat alias so legacy callers + tests importing `fetchOptionChain` keep working. */
-export const fetchOptionChain = acquireOptionChain;
 
 /**
  * Phase I (options ingestion wiring): upgrade a base `HistoricalBundle`

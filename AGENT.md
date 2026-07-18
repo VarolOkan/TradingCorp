@@ -109,6 +109,35 @@ env vars alone. Credentials are stored in an **encrypted LLM vault** at runtime
   credentialed-sources Settings UI — keep them hardcoded/backend-configured, not
   shown as token-entry fields.
 
+## 4b. No backward-compat shims — delete and repoint (HARD RULE)
+
+**When you move, rename, or delete a function/symbol, you MUST clean up every
+call site — do NOT leave a backward-compat alias, re-export, or thin wrapper
+behind "for safety."** A `export const oldName = newName;` shim, a type
+re-export, or a one-line wrapper that just delegates to the new location is
+technical debt the user explicitly does not want. The repo must not accumulate
+dead layers over time.
+
+Rules:
+- **Repoint every consumer** to the new name/location (tests included). Then
+  delete the old symbol. If a call site breaks, fix the call site — that is the
+  whole point.
+- **No `export const oldName = newName` aliases** and **no type re-exports** that
+  merely forward an old name to a new module. Consumers import from the canonical
+  home of the symbol.
+- **Delete orphaned source files** when their contents have fully moved. An empty
+  or one-line delegator file is worse than gone.
+- **Naming consistency**: when relocating logic into the adapter layer
+  (`src/registry/sources/adapters/`), name the exported function `acquire*` (e.g.
+  `acquirePriceBars`, `acquireOptionChain`, `acquireYahooChartRaw`,
+  `acquireAlphaVantageOverview`) — not `fetch*`. Use the canonical name
+  everywhere, including tests and doc comments.
+- **Grep your own work**: after a move, search the whole repo for the old symbol
+  name. Zero matches (outside historical docs/commit messages) is the bar. Update
+  doc comments that name the old symbol too.
+- This applies even when it costs extra effort — the user prefers the correct
+  cleanup over a quick alias, because alias debt compounds across months/years.
+
 ## 5. Semantic-honesty bar (UI badges / notes / banners)
 
 The user treats a **status badge that contradicts the underlying data as a BUG**.

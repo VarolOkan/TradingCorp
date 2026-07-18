@@ -82,4 +82,25 @@ describe('DomainSourcesTab (P3b)', () => {
     fireEvent.click(screen.getByText('Reset to defaults'));
     await waitFor(() => expect(client.resetDomainSources).toHaveBeenCalled());
   });
+
+  it('does NOT crash when a domain is missing available/enabled (regression: black screen)', async () => {
+    // A malformed /domain-sources payload (missing `available` or `enabled` on a
+    // domain) previously threw during render and, with no error boundary, tore
+    // down the entire React root — the whole app went black. The component must
+    // now render gracefully instead.
+    const MALFORMED: client.DomainSourcesResponse = {
+      domains: {
+        news_sentiment: { available: undefined as unknown as string[], override: undefined, enabled: undefined as unknown as string[], overridden: false },
+        price_bars: { available: ['yahoo'], override: undefined, enabled: undefined as unknown as string[], overridden: false },
+        fundamentals: { available: ['alphaVantage'], override: undefined, enabled: ['alphaVantage'], overridden: false },
+      },
+      overrides: {},
+    };
+    vi.spyOn(client, 'getDomainSources').mockResolvedValue(MALFORMED);
+    // Should render without throwing; the broken domains simply show as degraded.
+    expect(() => render(<DomainSourcesTab />)).not.toThrow();
+    expect(await screen.findByText('Price bars')).toBeInTheDocument();
+    expect(await screen.findByTestId('domain-degraded-price_bars')).toBeInTheDocument();
+    expect(await screen.findByTestId('domain-degraded-news_sentiment')).toBeInTheDocument();
+  });
 });

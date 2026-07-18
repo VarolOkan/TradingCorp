@@ -10,7 +10,8 @@ import { stringToSeed, seededRandom, annotateDataReceived, recordDataReceived, t
 import { fetchCompanyNews, newsToIngestedSentiment } from './news';
 import { fuseSentiment } from './fuse';
 import { resolveDomain } from './domains';
-import { alphaVantageFundamentalsAdapter } from '../sources/adapters/alphavantage-fundamentals';
+import { acquireAlphaVantageOverview } from '../sources/adapters/alphavantage-fundamentals';
+import { acquireYahooChartRaw } from '../sources/adapters/price-bars';
 import type { AnalystTuning } from '../../types/registry';
 
 export type { NodeSurface };
@@ -161,7 +162,7 @@ export async function dataIngestionHandler(
     output.sentiment_data = sentimentData;
 
     // Phase C: fetch the horizon-appropriate OHLCV bars for each ticker, reusing
-    // hist.fetchPriceBars (Yahoo live + deterministic mock fallback). Stash on
+    // hist.acquirePriceBars (Yahoo live + deterministic mock fallback). Stash on
     // state.ingested for downstream analysts (consumed Phases D–F). The fetchFn
     // is picked up from globalThis.fetch when present.
     const ingestedBars: Record<string, PriceBarSeries[]> = {};
@@ -352,12 +353,6 @@ export type IngestionFetchFn = (url: string) => Promise<{
   json: () => Promise<any>;
 }>;
 
-function yahooChartUrl(ticker: string, range = '1y', interval = '1d'): string {
-  return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-    ticker.toUpperCase(),
-  )}?range=${range}&interval=${interval}`;
-}
-
 /** Map a lookback in days to a Yahoo range token (clamped to Yahoo's caps). */
 function yahooRangeFor(lookbackDays: number): string {
   if (lookbackDays <= 5) return '5d';
@@ -432,20 +427,10 @@ export async function fetchRealFinancialData(
     // MarketCapitalization, …) — exactly the shape the Fundamental analyst
     // consumes. This is the genuine live source; the seeded block below is only
     // a parity fallback when no key / fetch are available.
-    let liveFundamentals: Record<string, any> | null = null;
-    if (alphaVantageKey && typeof doFetch === 'function') {
-      try {
-        const url = `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(alphaVantageKey)}`;
-        const res = await doFetch(url);
-        if (res.ok) {
-          const j = await res.json().catch(() => ({} as any));
-          // P1: parse delegated to the Alpha Vantage fundamentals adapter.
-          liveFundamentals = alphaVantageFundamentalsAdapter.normalize(j, { ticker });
-        }
-      } catch {
-        /* fall through to seeded fundamental */
-      }
-    }
+    // P4: URL + fetch delegated to the AV fundamentals adapter.
+    const liveFundamentals = alphaVantageKey && typeof doFetch === 'function'
+      ? await acquireAlphaVantageOverview(ticker, { fetchFn: doFetch as any, apiKey: alphaVantageKey })
+      : null;
 
     // ---- Mock fallback seeds (fundamental, sentiment, missing market bits) ----
     // Used only when no live fundamentals were retrieved above.
@@ -497,16 +482,9 @@ export async function fetchRealFinancialData(
     if (typeof doFetch === 'function') {
       for (const iv of intervals) {
         const range = yahooRangeFor(lookbackDays);
-        try {
-          const res = await doFetch(yahooChartUrl(ticker, range, iv));
-          if (res.ok) {
-            const payload = await res.json().catch(() => null);
-            const r = payload?.chart?.result?.[0];
-            if (r) intervalResults[iv] = r;
-          }
-        } catch {
-          /* fall through */
-        }
+        // P4: URL + fetch delegated to the price-bars adapter.
+        const r = await acquireYahooChartRaw(ticker, range, iv, doFetch);
+        if (r) intervalResults[iv] = r;
       }
       yahoo = Object.values(intervalResults)[0] ?? null;
     }

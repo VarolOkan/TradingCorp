@@ -11,8 +11,8 @@
 // can absorb N sources in P2 without changing. In P0 the list has exactly one
 // element (the legacy single source), preserving byte-for-byte parity.
 
-import type { PriceBarsResult } from '../logic/hist';
-import type { OptionChainResult } from '../logic/hist';
+import type { PriceBarsResult } from '../sources/adapters/price-bars';
+import type { OptionChainResult } from '../sources/adapters/option-chain';
 import type { NewsResult } from '../logic/news';
 
 /** The set of typed data needs an analyst can declare. Provider-agnostic. */

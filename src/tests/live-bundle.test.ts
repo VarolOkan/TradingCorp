@@ -37,7 +37,7 @@ describe('resolveLiveOptionsBundle (Phase I gateway)', () => {
         return {
           ok: true,
           status: 200,
-          // fetchOptionChain reads res.text() first (to capture provider error
+          // acquireOptionChain reads res.text() first (to capture provider error
           // bodies verbatim), then JSON.parses it — so the mock MUST expose text().
           text: async () => JSON.stringify(body),
           json: async () => body,

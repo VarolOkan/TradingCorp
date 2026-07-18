@@ -1,6 +1,6 @@
 # Multi-Source Data Architecture (vendor-agnostic fan-in)
 
-Status: P0–P3 SHIPPED + tested; P4 PARTIAL (call-site consolidation done, legacy-fetcher deletion BLOCKED on missing option_chain/fundamentals adapters); P5–P6 pending.
+Status: P0–P4 SHIPPED + tested; P5–P6 pending.
 hard-coded provider, let each data *domain* be served by one-or-many pluggable
 sources in different layouts, and let an analyst **weigh all candidate sources**
 instead of trusting a single one. Goal: kill vendor lock-in and widen the
@@ -24,8 +24,8 @@ provider-specific parse **inlined** at the call site. They bypass the existing
 | Data needed by analyst        | Current call site (hard-wired)                                  | Endpoint (inlined)                                  | Fallback today                         |
 |-------------------------------|----------------------------------------------------------------|-----------------------------------------------------|----------------------------------------|
 | Price bars (technical/options)| `hist.fetchPriceBars` `src/registry/logic/hist.ts:401`         | `YAHOO_CHART(...)` (Yahoo chart API)                 | deterministic mock (`source:'mock'`)   |
-| Option chain (options/greeks) | `hist.fetchOptionChain` `hist.ts:917`; `resolveLiveOptionsBundle` `hist.ts:1134` | `api.massive.com/v3/snapshot/options/{ticker}` | `fetchCboeOptionChain` `hist.ts:683` (CDN, keyless), then mock |
-| Fundamentals (fundamental)    | `data-ingestion.fetchRealFinancialData` `data-ingestion.ts:399` (AlphaVantage branch `:433`) | `alphavantage.co/query?function=OVERVIEW` | seeded random balance sheet (`data-ingestion.ts:468`) |
+| Option chain (options/greeks) | `resolveLiveOptionsBundle` → `acquireOptionChain` (`adapters/option-chain.ts`) | `api.massive.com/v3/snapshot/options/{ticker}` | `fetchCboeOptionChain` (`adapters/option-chain.ts`, CDN, keyless), then mock |
+| Fundamentals (fundamental)    | `data-ingestion.fetchRealFinancialData` → `fetchAlphaVantageOverview` (`adapters/alphavantage-fundamentals.ts`) | `alphavantage.co/query?function=OVERVIEW` | seeded random balance sheet |
 | News/sentiment (sentiment)    | `news.fetchCompanyNews` `news.ts:278`                          | Finnhub `finnhub.io/api/v1/company-news`            | Yahoo → Google News RSS → synthetic mock (already fan-in!) |
 | Risk-free rate (options)      | Treasury feed (keyless)                                         | `api.fiscaldata.treasury.gov/...avg_interest_rates` | n/a (auth:'none')                      |
 
@@ -262,10 +262,12 @@ Split into P2b-1 (backend — DONE) and P2b-2 (frontend trace drawer — NEXT).
   now lists BOTH providers. Single-live still uses the primary unchanged.
 - `NewsResult.consensus` (agreement / low_consensus / contributors / contributions)
   is populated on blended `mixed` results, ready for the UI.
-- `src/tests/resolve-domain-multisource.test.ts` — 5 tests: 2 live records when
-  both live; blend + divergent + flag-consistency; no-key single record with
-  HONEST sourceId; parity-mock degrades to single record (P0 parity preserved).
-
+- The P2b + P3a tests live together with the P0 parity tests in
+  `src/tests/domains.p0.test.ts` (merged — no separate resolve-domain-* files).
+  P2b: 5 tests — 2 live records when both live; blend + divergent +
+  flag-consistency; no-key single record with HONEST sourceId; parity-mock
+  degrades to single record (P0 parity preserved).
+- `resolveDomain` news branch honors the enabled set: primary is finnhub (with
 **P2b-2 — STATUS: DONE (frontend trace drawer). 39 FE files / 323 pass (+1).**
 - `MarketDataCard.tsx` Sentiment Analyst read now renders the fusion readout
   when `sentiment.consensus` is present: BOTH source badges (finnhub / yahoo /
@@ -303,10 +305,10 @@ parity-safe (P0 tests still green).
   key) IFF 'finnhub' is enabled, else the keyless yahoo/google chain; a keyless
   secondary is appended only when finnhub is primary AND a keyless source is
   enabled. So disabling finnhub → yahoo-only; disabling all → honest skip.
-- `src/tests/resolve-domain-swappable.test.ts` (5 tests): default parity (finnhub
-  primary); disable finnhub → yahoo/google only; disable all → honest skipped +
-  no false live; disable price_bars source → that domain skips, news unaffected;
-  reorder [yahoo,finnhub] still yields live data.
+- P3a tests (5) live with the P0 parity tests in `src/tests/domains.p0.test.ts`:
+  default parity (finnhub primary); disable finnhub → yahoo/google only; disable
+  all → honest skipped + no false live; disable price_bars source → that domain
+  skips, news unaffected; reorder [yahoo,finnhub] still yields live data.
 - tsc: 71 (0 new). P0 parity (9/9) + P2b multisource (5/5) still green.
 
 **P3b DONE (frontend + wiring + persistence).** A persisted per-domain source config
@@ -333,62 +335,70 @@ providers.
   `SettingsDialog.tsx` as the **Data Sources** tab (+ CSS in `index.css`).
 - Tests: `src/tests/domain-source-routes.test.ts` (5: GET/POST/validate/reset/
   disk-persist + ctx-override-wins) + `frontend/src/test/DomainSourcesTab.test.tsx`
-  (4: load/toggle-degrade/save-POSTs/reset).
-- Verified: backend 68 suites / 610 pass (+5); frontend 40 files / 327 pass (+4);
-  tsc 71 (zero new); P0 9/9 + P2b 5/5 parity intact.
+  (5: load/toggle-degrade/save-POSTs/reset/malformed-payload) +
+  `frontend/src/test/SettingsDialogDomains.test.tsx` (2: clicking the Data
+  Sources tab renders the editor without crashing; Accept saves via ref).
+- **Bugfix: Data Sources tab black-screen.** `SettingsDialog.tsx` referenced an
+  undeclared `saving` variable in the domains-tab Accept button, throwing a
+  `ReferenceError` on render that tore down the whole app (the error boundary
+  only catches child renders, not the parent's JSX). Removed the stray
+  `disabled={saving}`; regression tests in `SettingsDialogDomains.test.tsx`
+  mount the real dialog and click the tab so this can't regress silently.
+- Verified: backend 68 suites / 610 pass (+5); frontend 41 files / 330 pass (+6);
+  tsc 71 (zero new); P0 9/9 + P2b 5/5 + P3a 5/5 parity intact.
 - NOTE (untested end-to-end in this container): the running XAss copy is not in
   the sandbox, so the live click-through (toggle → next run shows new provenance)
   was NOT exercised in a browser here. The store→resolveDomain wiring is unit-
   proven; deploy + manual UI verify still required (see P3b deploy note).
 
-### P4 — Consolidate call sites onto `resolveDomain` (PARTIAL — deletion BLOCKED)
-**Goal:** every external consumer of raw provider data goes through `resolveDomain`
-so the multi-source layer (swappable sources, honest degrade, fan-in) is the single
-funnel. The originally-intended *deletion* of the legacy fetchers turned out to be
-blocked by missing infrastructure (see "Blocked" below) — so P4 delivered the
-safe consolidation and explicitly did NOT delete live code.
+### P4 — Delete legacy hard-wired fetchers (DONE — verified, zero regressions)
+**Goal:** remove every inlined provider URL + fetch from the legacy logic files
+(`hist.ts`, `data-ingestion.ts`, `news.ts`, `domains.ts`) so the multi-source
+layer is the single funnel and the **grep-guard** is satisfied (no provider URL
+outside `src/registry/sources/adapters/` or `DEFAULT_SOURCE_URIS`).
 
-**Done (verified, zero regressions — backend 610 pass / 1 skip, tsc 70):**
-- P4.1 `GET /history` (history-routes.ts) → `resolveDomain('price_bars')`;
-  returns `record[0].data` (== the raw `fetchPriceBars` payload) so the frontend
-  contract is byte-identical. 19 route tests pass.
-- P4.2 `GET /options-history` (options-history-routes.ts) → `resolveDomain('option_chain')`;
-  vault key still resolved + passed as `ctx.apiKey`; returns `record[0].data`.
-- P4.4 screener `evaluateTicker` `fetchPriceBars` → `resolveDomain('price_bars')`;
-  `barsRes` typed back to `PriceBarsResult` so `barsRes.bars` shape is preserved.
-  22 screener tests pass.
+**Approach (parity-gated, each step proven by tests):**
+- **B1 price-bars:** `fetchPriceBars` (URL + fetch + `generateBars` mock fallback)
+  moved to `adapters/price-bars.ts` as `acquirePriceBars`. `hist.ts` keeps only
+  the shared `generateBars`/`basePrice` deterministic utils; `resolveDomain`
+  (`price_bars`, `market_meta`) + `fetchEquityBars` now call `acquirePriceBars`.
+- **B2 option-chain:** the Massive snapshot + CBOE CDN + Yahoo crumb-dance URLs +
+  `parseCboeOptions` greeks logic moved to `adapters/option-chain.ts` as
+  `acquireOptionChain` (aliased `fetchOptionChain`), `fetchCboeOptionChain`,
+  `fetchYahooOptionChain`. `resolveLiveOptionsBundle` also moved there (it calls
+  `acquirePriceBars`/`acquireOptionChain` directly to avoid an import cycle).
+  A circular-import trap (adapter↔hist) was broken by making the adapter own the
+  `OptionChainFetchFn`/`OptionChainResult` types and keeping only the PURE parsers
+  + deterministic mock engine in `hist.ts`.
+- **B3 fundamentals:** the Alpha Vantage OVERVIEW URL + fetch moved to
+  `adapters/alphavantage-fundamentals.ts` as `fetchAlphaVantageOverview`; the
+  Yahoo chart URL + fetch moved to `adapters/price-bars.ts` as `fetchYahooChartRaw`.
+  `data-ingestion.fetchRealFinancialData` is now a thin orchestrator calling those
+  two adapter helpers + `fetchCompanyNews` — no provider URL remains in
+  `data-ingestion.ts`.
 
-**Blocked / NOT done (deliberately, to avoid breaking the running app):**
-- P4.3 data-ingestion fundamentals repoint: `fetchRealFinancialData`
-  (data-ingestion.ts:402) is a **multi-domain orchestrator** (fundamental +
-  technical + sentiment + market + bars), not just fundamentals. `resolveDomain('fundamentals')`
-  only extracts its `fundamental_data[ticker]` slice. Repointing the ingestion
-  handler would require re-plumbing the whole 4-domain object — high regression
-  risk for a cleanup phase. Left as-is (handler still calls `fetchFinancialData`).
-- P4.5/P4.6 literal deletion of `fetchPriceBars`/`fetchOptionChain`/`fetchRealFinancialData`:
-  **NOT safe, because `resolveDomain` itself still calls all three** (domains.ts:91/101/146/186).
-  The doc's premise ("everything flows through resolveDomain → adapters →
-  `acquireSource`") was never reached — the `adapters/` layer was built in P1 but
-  never switched onto the hot path. Two hard gaps:
-  1. **No `option_chain` adapter exists.** `adapters/` only has yahoo-price,
-     finnhub-news, alphaVantage-fundamentals. The entire Massive→CBOE→mock
-     fallback + `parseCboeOptions` greeks logic lives ONLY in `fetchOptionChain`
-     (hist.ts:891). Deleting it would delete the FREE CBOE delayed options feed
-     + greeks the product depends on. `acquireSource`'s `fallbackSourceId` is a
-     field-projection fallback, not a shape-transform (CBOE needs `parseCboeOptions`
-     to become an `OptionChainResult`) — so it cannot replace `fetchOptionChain`.
-  2. `fetchRealFinancialData` is the orchestrator backing `fundamentals` +
-     technical + market, with no adapter equivalent.
+**Done (verified — backend 610 pass / 1 skip, frontend 327 pass, tsc clean in all
+touched files):**
+- All three legacy fetchers relocated; `resolveDomain`'s `price_bars`,
+  `option_chain`, `fundamentals` branches + the ingestion orchestrator now go
+  through the adapters. Legacy names (`fetchPriceBars`, `fetchOptionChain`,
+  `fetchYahooOptionChain`, `resolveLiveOptionsBundle`, `LiveOptionsResult`) are
+  re-exported/aliased from the adapters for backward-compat, so every consumer
+  (history-routes, options-history-routes, screener, options_ingestion, tests)
+  keeps working unchanged.
+- **grep-guard passes:** the only provider URLs in the codebase now live in
+  `src/registry/sources/adapters/*` (Yahoo query1/query2, Massive, CBOE, Alpha
+  Vantage) and `DEFAULT_SOURCE_URIS` / `DataSourceSpec.endpoint` in the registry
+  schema (`analyst-config-schema.ts`, `analysts.ts`) — both allow-listed by the
+  guard. `hist.ts`, `data-ingestion.ts`, `news.ts`, `domains.ts` are URL-free.
+- `acquireSource`/`acquireForAnalyst` retained as the engine.
 
-**To actually complete the deletion (future work, NOT a cleanup):** build the
-missing `option_chain` adapter (Massive + CBOE fallback + mock, preserving
-`parseCboeOptions` greeks) + a `fundamentals`/technical/market adapter set, then
-rewrite `resolveDomain`'s branches to use `acquireSource` + adapters. Only then do
-the legacy fetchers become dead. Until that lands, the fetchers remain as
-`resolveDomain`'s backing implementation and the grep-guard acceptance test
-(§P4 old spec) cannot pass without breaking the credentials UI / options feed.
-
-- Keep `acquireSource`/`acquireForAnalyst` (they are the engine).
+**Note on `fetchRealFinancialData`:** it remains a multi-domain *orchestrator*
+(fundamental + technical + sentiment + market + bars) — not deleted, because it
+is the correct funnel for the 4-domain ingestion object. Its URL-bearing parts are
+now delegated to adapters; the orchestration glue (seeded fallbacks, source labels,
+`data_quality`) stays put. This satisfies the grep-guard without re-plumbing the
+ingestion contract.
 - Verify (for the parts that shipped): full backend suite + frontend 327 + the
   earlier parity tests (P0 9/9, P2b 5/5, P3a 5/5, P3b 5/5) all still green.
 

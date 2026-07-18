@@ -126,6 +126,14 @@ export const SourcesTab = forwardRef<SourcesTabHandle, SourcesTabProps>(function
     }
   };
 
+  // A key group (e.g. Massive/Polygon options + daily aggregates) shares ONE
+  // API key across endpoints, so it gets ONE combined [Test] button at the
+  // bottom of the group — not one button per endpoint splitting the inputs.
+  // We probe every member endpoint and surface a single aggregate result.
+  const runGroupTest = async (members: SourceCredField[]) => {
+    await Promise.all(members.map((m) => runTest(m.sourceId)));
+  };
+
   const setField = (sourceId: string, field: keyof SourceForm, value: string) =>
     setForms((prev) => ({ ...prev, [sourceId]: { ...prev[sourceId], [field]: value } }));
 
@@ -234,6 +242,39 @@ export const SourcesTab = forwardRef<SourcesTabHandle, SourcesTabProps>(function
     </div>
   );
 
+  // Combined [Test] for a key group: one button at the bottom that probes every
+  // member endpoint. Shows an aggregate status (e.g. "2/2 OK" or the first
+  // failure) so the two endpoint inputs stay grouped — not split by a button.
+  const renderGroupTest = (groupId: string, members: SourceCredField[]) => {
+    const anyLoading = members.some((m) => testState[m.sourceId]?.loading);
+    const results = members.map((m) => testState[m.sourceId]);
+    const someTested = results.some((r) => r?.result || r?.error);
+    const allOk = someTested && results.every((r) => r?.result?.ok);
+    const anyFail = results.some((r) => (r?.result && !r.result.ok) || r?.error);
+    const okCount = results.filter((r) => r?.result?.ok).length;
+    return (
+      <div className="source-test-row source-test-row-group">
+        <button
+          type="button"
+          className="source-test-btn"
+          aria-label={`Test ${row_Label(groupId)} endpoints`}
+          disabled={saving || anyLoading}
+          onClick={() => runGroupTest(members)}
+        >
+          {anyLoading ? 'Testing…' : `Test ${members.length} endpoints`}
+        </button>
+        {someTested && (
+          <span className={`source-test-result ${anyFail ? 'fail' : 'ok'}`} role="status">
+            {allOk ? `OK · ${okCount}/${members.length}` : anyFail ? 'Failed' : `${okCount}/${members.length}`}
+          </span>
+        )}
+      </div>
+    );
+  };
+  // Local label lookup for the group test button aria-label.
+  const row_Label = (groupId: string) =>
+    rows.find((r) => r.kind === 'group' && r.groupId === groupId)?.label ?? 'group';
+
   return (
     <fieldset className="settings-group" disabled={saving}>
       <legend>Source credentials</legend>
@@ -341,10 +382,10 @@ export const SourcesTab = forwardRef<SourcesTabHandle, SourcesTabProps>(function
                       aria-label={`${m.label} ${m.uriLabel}`}
                     />
                   </label>
-                  {renderTestRow(m)}
                 </div>
               ))}
             </div>
+            {renderGroupTest(row.groupId, row.members)}
           </div>
         ),
       )}

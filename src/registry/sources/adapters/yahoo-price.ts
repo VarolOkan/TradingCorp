@@ -1,6 +1,6 @@
 // src/registry/sources/adapters/yahoo-price.ts
 // P1: pure parse for the Yahoo v8 chart payload -> canonical PriceBar[].
-// Extracted verbatim (behavior-identical) from hist.ts fetchPriceBars inline
+// Extracted verbatim (behavior-identical) from hist.ts acquirePriceBars inline
 // block. The clean extraction also fixes two long-standing strict-mode issues
 // the inline version carried (exactOptionalPropertyTypes vwap + possibly-
 // undefined timestamp indexing) without changing output.

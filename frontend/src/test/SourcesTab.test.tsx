@@ -254,13 +254,21 @@ describe('SourcesTab (shared, GPG-persisting, single Save button)', () => {
       await waitFor(() => expect(screen.getByLabelText('Massive/Polygon Options key stored')).toBeInTheDocument());
     });
 
-    it('each grouped endpoint still has its OWN [Test] button probing options_ingestion', async () => {
-      const spy = vi.spyOn(analystConfigClient, 'testAnalystConfig').mockResolvedValue({ ok: true, sourceId: 'polygonHist', hasToken: true, latencyMs: 88 });
+    it('renders ONE combined [Test] button at the bottom (not one per endpoint)', async () => {
+      const spy = vi
+        .spyOn(analystConfigClient, 'testAnalystConfig')
+        .mockResolvedValue({ ok: true, sourceId: 'polygonOptions', hasToken: true, latencyMs: 88 });
       const ref = createRef<SourcesTabHandle>();
       render(<SourcesTab ref={ref} analystId="data_ingestion" sessionId="s1" sources={sourcesGrouped} />);
-      fireEvent.click(screen.getByRole('button', { name: /Test Polygon Aggregates connection/i }));
+      // One combined button for the whole group — no per-endpoint buttons.
+      expect(screen.queryByRole('button', { name: /Test Polygon Options connection/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Test Polygon Aggregates connection/i })).toBeNull();
+      const groupTest = screen.getByRole('button', { name: /Test Massive\/Polygon Options endpoints/i });
+      fireEvent.click(groupTest);
+      // The combined probe hits BOTH member endpoints under options_ingestion.
+      await waitFor(() => expect(spy).toHaveBeenCalledWith('options_ingestion', 'polygonOptions', 's1'));
       await waitFor(() => expect(spy).toHaveBeenCalledWith('options_ingestion', 'polygonHist', 's1'));
-      expect(await screen.findByText(/OK · 88ms/)).toBeInTheDocument();
+      expect(await screen.findByText(/OK · 2\/2/)).toBeInTheDocument();
     });
   });
 });
