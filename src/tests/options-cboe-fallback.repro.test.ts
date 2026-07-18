@@ -13,7 +13,8 @@
 // skip it in offline environments. The deterministic contract test lives in
 // options-cboe-fallback.test.ts (no network) and always runs.
 
-import { describeNet, itNet, expect } from './netTestEnv';
+import { describeNet, itNet } from './netTestEnv';
+import { expect } from '@jest/globals';
 import https from 'https';
 import { acquireOptionChain } from '../registry/sources/adapters/option-chain';
 
