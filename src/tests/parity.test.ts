@@ -46,6 +46,8 @@ describe('long-term agency (single runtime graph)', () => {
       'fundamental',
       'technical',
       'sentiment',
+      'bull_researcher',
+      'bear_researcher',
       'risk',
       'governance',
     ]);
@@ -62,10 +64,12 @@ describe('long-term agency (single runtime graph)', () => {
       'fundamental',
       'technical',
       'sentiment',
+      'bull_researcher',
+      'bear_researcher',
       'risk',
       'governance',
     ]);
-    expect(traces.length).toBe(7);
+    expect(traces.length).toBe(9);
     expect(['APPROVE', 'REJECT']).toContain(result.final_decision);
     expect(result.error).toBeNull();
   });
@@ -79,6 +83,8 @@ describe('long-term agency (single runtime graph)', () => {
       'fundamental',
       'technical',
       'sentiment',
+      'bull_researcher',
+      'bear_researcher',
       'risk',
       'governance',
     ]);

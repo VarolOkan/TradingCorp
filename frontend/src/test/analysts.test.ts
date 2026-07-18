@@ -2,7 +2,7 @@
 import { ANALYSTS, analystById, AnalystId } from '../components/analysts/analysts';
 
 describe('analysts metadata', () => {
-  it('defines the 15 pipeline analysts in order (8 equity + 7 options)', () => {
+  it('defines the 17 pipeline analysts in order (10 equity + 7 options)', () => {
     const ids = ANALYSTS.map((a) => a.id);
     expect(ids).toEqual([
       'orchestrator',
@@ -10,6 +10,8 @@ describe('analysts metadata', () => {
       'fundamental',
       'technical',
       'sentiment',
+      'bull_researcher',
+      'bear_researcher',
       'risk',
       'governance',
       'onchain',
@@ -34,10 +36,10 @@ describe('analysts metadata', () => {
     }
   });
 
-  it('stages follow the intake/analysis/decision shape (2 intake, analysis, 1 decision + 7 options)', () => {
+  it('stages follow the intake/analysis/debate/decision shape (2 intake, analysis, 2 debate, 1 decision + 7 options)', () => {
     const stages = ANALYSTS.map((a) => a.stage);
-    // equity: [1,1,2,2,2,2,3,2]; options: ingestion=1, 5 analysis=2, risk=3
-    expect(stages).toEqual([1, 1, 2, 2, 2, 2, 3, 2, 1, 2, 2, 2, 2, 2, 3]);
+    // equity: [1,1,2,2,2,3,3,2,4,2]; options: ingestion=1, 5 analysis=2, risk=3
+    expect(stages).toEqual([1, 1, 2, 2, 2, 3, 3, 2, 4, 2, 1, 2, 2, 2, 2, 2, 3]);
   });
 
   it('analystById returns the right record', () => {

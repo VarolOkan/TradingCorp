@@ -54,7 +54,7 @@ describe('useAnalystRun (event-driven)', () => {
       useAnalystRun(socket as any, ['AAPL'], { onComplete })
     );
 
-    const ids = ['orchestrator', 'data_ingestion', 'fundamental', 'technical', 'sentiment', 'risk', 'governance', 'onchain',
+    const ids = ['orchestrator', 'data_ingestion', 'fundamental', 'technical', 'sentiment', 'bull_researcher', 'bear_researcher', 'risk', 'governance', 'onchain',
       'options_ingestion', 'vol_surface', 'options_pricing', 'options_greeks', 'options_flow', 'options_technical', 'options_risk'];
     act(() => {
       for (const id of ids) {

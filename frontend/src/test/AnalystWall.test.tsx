@@ -46,7 +46,7 @@ describe('AnalystWall', () => {
     }));
     render(<AnalystWall run={makeRun({ cells })} />);
     const panels = document.querySelectorAll('.analyst-panel');
-    expect(panels.length).toBe(15);
+    expect(panels.length).toBe(ANALYSTS.length);
     const active = document.querySelector('.analyst-panel.phase-active');
     expect(active).not.toBeNull();
     expect(active!.textContent).toContain('AAPL');
@@ -62,8 +62,8 @@ describe('AnalystWall', () => {
       progress: 1,
     }));
     render(<AnalystWall run={makeRun({ cells, completed: true })} />);
-    expect(document.querySelectorAll('.analyst-panel.phase-done').length).toBe(15);
-    expect(document.querySelectorAll('.status-dot.status-done').length).toBe(15);
+    expect(document.querySelectorAll('.analyst-panel.phase-done').length).toBe(ANALYSTS.length);
+    expect(document.querySelectorAll('.status-dot.status-done').length).toBe(ANALYSTS.length);
   });
 
   it('renders a shimmer fill width reflecting progress', () => {

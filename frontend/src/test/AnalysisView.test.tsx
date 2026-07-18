@@ -88,8 +88,8 @@ describe('AnalysisView — agency-first UX', () => {
 
   it('shows the default agency wall on first render (no ticker entered)', () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
-    // Long-term default => 7 equity analyst panels (no On-Chain Flow).
-    expect(panels().length).toBe(7);
+    // Long-term default => 9 equity analyst panels (incl. bull/bear debate + governance).
+    expect(panels().length).toBe(9);
     expect(screen.getByText('Orchestrator')).toBeInTheDocument();
     expect(screen.getByText('Governance')).toBeInTheDocument();
     expect(screen.queryByText('On-Chain Flow')).toBeNull();
