@@ -222,6 +222,108 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
       flags: [{ if: 'Math.abs(news_score - social_score) > 40', then: 'WARN: source divergence' }] },
   },
 
+  // ============================ Bull/Bear Researcher debate (TradingAgents lift) ============================
+  // Two stage-2 "researcher" analysts that critically assess the Analyst Team's
+  // findings (fundamental/technical/sentiment) BEFORE governance decides. They
+  // are declarative (no LLM) so the default run stays parity-safe + deterministic.
+  // They depend on the Analyst Team exactly like `risk` does, so they become
+  // extra stage-2 LEAVES — governance's stage-3 fan-in (all stage-2 leaves) and
+  // its explicit dependsOn pick them up. Same depth as the analyst trio → the
+  // parallel wiring still passes parallelTopologySafe (no mixed-depth fan-in).
+
+  bull_researcher: {
+    id: 'bull_researcher',
+    kind: 'analyst',
+    name: 'Bull Researcher',
+    role: 'Argues the constructive case',
+    stage: 3,
+    accent: '#22c55e',
+    monogram: 'BL',
+    prompt: prompter('bull_researcher'),
+    dependsOn: ['fundamental', 'technical', 'sentiment'],
+    dataSources: [{
+      from: 'data_ingestion',
+      fields: ['fundamental_score', 'technical_score', 'sentiment_score'],
+      label: 'Analyst Team output',
+      sources: ['(pipeline)'],
+    }],
+    features: [
+      { key: 'fundamental_score', label: 'Fundamental support', source: 'dataSources.0', aggregation: 'last' },
+      { key: 'technical_score', label: 'Technical support', source: 'dataSources.0', aggregation: 'last' },
+      { key: 'sentiment_score', label: 'Sentiment support', source: 'dataSources.0', aggregation: 'last' },
+    ],
+    logic: {
+      mode: 'declarative',
+      weighting: [
+        { label: 'Fundamental case', inputs: ['fundamental_score'], weight: 0.4, rationale: 'strong fundamentals anchor the bull case' },
+        { label: 'Technical case', inputs: ['technical_score'], weight: 0.35, rationale: 'uptrend / momentum supports the case' },
+        { label: 'Sentiment case', inputs: ['sentiment_score'], weight: 0.25, rationale: 'positive narrative reinforces the case' },
+      ],
+      score: { from: 'weightedSum', range: [0, 100], round: true },
+      verdict: {
+        from: 'score',
+        mapping: [
+          { if: '>=', value: 60, then: 'BULLISH' },
+          { if: '<', value: 40, then: 'BEARISH' },
+        ],
+        default: 'NEUTRAL',
+      },
+      summaryTemplate: 'Bull case {score}/100 → {verdict}',
+    },
+    output: { channels: ['bull_research'] },
+    tasks: ['Weighing fundamental support', 'Reading technical uptrend', 'Netting positive narrative'],
+    // Keyed by FEATURE so the declarative weighted-sum has non-zero inputs.
+    mock: { generator: 'seeded', seedFrom: 'ticker',
+      ranges: { fundamental_score: [40, 95], technical_score: [35, 90], sentiment_score: [-40, 75] },
+      flags: [] },
+  },
+
+  bear_researcher: {
+    id: 'bear_researcher',
+    kind: 'analyst',
+    name: 'Bear Researcher',
+    role: 'Argues the skeptical case',
+    stage: 3,
+    accent: '#ef4444',
+    monogram: 'BR',
+    prompt: prompter('bear_researcher'),
+    dependsOn: ['fundamental', 'technical', 'sentiment'],
+    dataSources: [{
+      from: 'data_ingestion',
+      fields: ['fundamental_score', 'technical_score', 'sentiment_score'],
+      label: 'Analyst Team output',
+      sources: ['(pipeline)'],
+    }],
+    features: [
+      { key: 'fundamental_score', label: 'Fundamental risk', source: 'dataSources.0', aggregation: 'last' },
+      { key: 'technical_score', label: 'Technical risk', source: 'dataSources.0', aggregation: 'last' },
+      { key: 'sentiment_score', label: 'Sentiment risk', source: 'dataSources.0', aggregation: 'last' },
+    ],
+    logic: {
+      mode: 'declarative',
+      weighting: [
+        { label: 'Fundamental risk', inputs: ['fundamental_score'], weight: 0.4, rationale: 'weak fundamentals threaten the bull case', invert: true },
+        { label: 'Technical risk', inputs: ['technical_score'], weight: 0.35, rationale: 'downtrend / breakdown threatens the case', invert: true },
+        { label: 'Sentiment risk', inputs: ['sentiment_score'], weight: 0.25, rationale: 'negative narrative undermines the case', invert: true },
+      ],
+      score: { from: 'weightedSum', range: [0, 100], round: true },
+      verdict: {
+        from: 'score',
+        mapping: [
+          { if: '>=', value: 60, then: 'BEARISH' },
+          { if: '<', value: 40, then: 'BULLISH' },
+        ],
+        default: 'NEUTRAL',
+      },
+      summaryTemplate: 'Bear case {score}/100 → {verdict}',
+    },
+    output: { channels: ['bear_research'] },
+    tasks: ['Stress-testing fundamentals', 'Flagging technical breakdown', 'Challenging the narrative'],
+    mock: { generator: 'seeded', seedFrom: 'ticker',
+      ranges: { fundamental_score: [40, 95], technical_score: [35, 90], sentiment_score: [-40, 75] },
+      flags: [] },
+  },
+
   risk: {
     id: 'risk',
     kind: 'analyst',
@@ -250,8 +352,9 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
     kind: 'gatekeeper',
     name: 'Governance',
     role: 'Preservation-first veto',
-    stage: 3,
+    stage: 4,
     accent: '#10b981',
+    // Gatekeeper consumes risk + bull/bear debate; never runs an LLM by default.
     monogram: 'GV',
     prompt: prompter('governance'),
     dependsOn: ['risk'],

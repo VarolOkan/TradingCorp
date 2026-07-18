@@ -35,8 +35,8 @@ export function validateAnalystDef(def: AnalystDef | Record<string, unknown>, id
   }
 
   // stage
-  if (def.stage === undefined || ![1, 2, 3].includes(def.stage as number)) {
-    errors.push(`${label}: stage must be 1, 2, or 3, got ${def.stage}`);
+  if (def.stage === undefined || ![1, 2, 3, 4].includes(def.stage as number)) {
+    errors.push(`${label}: stage must be 1, 2, 3, or 4, got ${def.stage}`);
   }
 
   // accent — optional but must be hex-like if present

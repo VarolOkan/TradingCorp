@@ -20,6 +20,8 @@ export type AnalystId =
   | 'sentiment'
   | 'risk'
   | 'governance'
+  | 'bull_researcher'
+  | 'bear_researcher'
   | 'onchain'
   // ---- Phase B/C: options analysts (instrument OPTION) ----
   | 'options_ingestion'
@@ -39,8 +41,8 @@ export interface AnalystMeta {
   accent: string;
   /** Two-letter monogram in the panel header. */
   monogram: string;
-  /** Stage number (1 = intake, 2 = analysis, 3 = decision). */
-  stage: 1 | 2 | 3;
+  /** Stage number (1 = intake, 2 = analysis, 3 = debate/research, 4 = decision). */
+  stage: 1 | 2 | 3 | 4;
   /** Mock sub-tasks cycled through per ticker during a simulated run. */
   tasks: string[];
 }
@@ -93,6 +95,24 @@ export const ANALYSTS: AnalystMeta[] = [
     tasks: ['Scanning headlines', 'Weighing social', 'Netting positioning'],
   },
   {
+    id: 'bull_researcher',
+    name: 'Bull Researcher',
+    role: 'Argues the constructive case',
+    accent: '#22c55e',
+    monogram: 'BL',
+    stage: 3,
+    tasks: ['Weighing fundamental support', 'Reading technical uptrend', 'Netting positive narrative'],
+  },
+  {
+    id: 'bear_researcher',
+    name: 'Bear Researcher',
+    role: 'Argues the skeptical case',
+    accent: '#ef4444',
+    monogram: 'BR',
+    stage: 3,
+    tasks: ['Stress-testing fundamentals', 'Flagging technical breakdown', 'Challenging the narrative'],
+  },
+  {
     id: 'risk',
     name: 'Risk',
     role: 'Exposure · sizing · stop',
@@ -107,7 +127,7 @@ export const ANALYSTS: AnalystMeta[] = [
     role: 'Preservation-first veto',
     accent: '#10b981',
     monogram: 'GV',
-    stage: 3,
+    stage: 4,
     tasks: ['Reviewing debate', 'Applying veto test', 'Issuing decision'],
   },
   {

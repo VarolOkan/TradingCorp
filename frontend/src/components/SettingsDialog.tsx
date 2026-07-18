@@ -224,14 +224,14 @@ export function SettingsDialog({
   const [analystBusy, setAnalystBusy] = useState(false);
   // Edit target: when set, the form edits an existing custom analyst; null = create mode.
   const [editAnalyst, setEditAnalyst] = useState<CatalogAnalyst | null>(null);
-  // Filter for the analyst list: 'all' or a specific stage (1 | 2 | 3).
-  const [stageFilter, setStageFilter] = useState<1 | 2 | 3>(1);
+  // Filter for the analyst list: 'all' or a specific stage (1 | 2 | 3 | 4).
+  const [stageFilter, setStageFilter] = useState<1 | 2 | 3 | 4>(1);
   // New/edit analyst form.
   const [aId, setAId] = useState('');
   const [aName, setAName] = useState('');
   const [aRole, setARole] = useState('');
   const [aKind, setAKind] = useState<AnalystKind>('analyst');
-  const [aStage, setAStage] = useState<'1' | '2' | '3'>('2');
+  const [aStage, setAStage] = useState<'1' | '2' | '3' | '4'>('2');
   const [aAccent, setAAccent] = useState('#6366f1');
   const [aDependsOn, setADependsOn] = useState('');
   // Input data sources (dataSources[]) — each: id, label, from, fields, sources.
@@ -374,7 +374,7 @@ export function SettingsDialog({
       id: aId.trim(),
       name: aName.trim(),
       kind: aKind,
-      stage: Number(aStage) as 1 | 2 | 3,
+      stage: Number(aStage) as 1 | 2 | 3 | 4,
       accent: aAccent.trim() || '#6366f1',
       role: aRole.trim() || undefined,
       dependsOn: aDependsOn.split(',').map((x) => x.trim()).filter(Boolean),
@@ -1298,7 +1298,7 @@ export function SettingsDialog({
             </p>
 
             <div className="analyst-stage-tabs" role="tablist" aria-label="Filter analysts by stage">
-              {([1, 2, 3] as const).map((s) => (
+              {([1, 2, 3, 4] as const).map((s) => (
                 <Fragment key={String(s)}>
                   <button
                     type="button"
@@ -1308,9 +1308,9 @@ export function SettingsDialog({
                     data-testid={`analyst-stage-${s}`}
                     onClick={() => setStageFilter(s)}
                   >
-                    {`Stage ${s}`}
+                    {`Stage ${s} · ${s === 1 ? 'Intake' : s === 2 ? 'Analysis' : s === 3 ? 'Debate' : 'Decision'}`}
                   </button>
-                  {s < 3 && (
+                  {s < 4 && (
                     <span className="stage-arrow" aria-hidden="true" data-testid={`stage-arrow-${s}`}>
                       →
                     </span>
@@ -1487,7 +1487,8 @@ export function SettingsDialog({
                       >
                         <option value="1">1 · intake</option>
                         <option value="2">2 · analysis</option>
-                        <option value="3">3 · decision</option>
+                        <option value="3">3 · debate</option>
+                        <option value="4">4 · decision</option>
                       </select>
                     </label>
                     <label>

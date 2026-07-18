@@ -169,8 +169,8 @@ export interface AnalystDef {
   name: string;
   /** Short role line (under the name in the wall). */
   role: string;
-  /** Pipeline stage (1=intake, 2=analysis, 3=decision). */
-  stage: 1 | 2 | 3;
+  /** Pipeline stage (1=intake, 2=analysis, 3=debate/research, 4=decision). */
+  stage: 1 | 2 | 3 | 4;
   /** Accent color (hex) for the panel. */
   accent: string;
   /** Two-letter monogram. */
@@ -225,7 +225,8 @@ export interface AgencyAnalystRef {
   name?: string;
   role?: string;
   accent?: string;
-  stage?: 1 | 2 | 3;
+  /** Pipeline stage (1=intake, 2=analysis, 3=debate/research, 4=decision). */
+  stage?: 1 | 2 | 3 | 4;
   monogram?: string;
   prompt?: string | { key: string };
   dependsOn?: string[];

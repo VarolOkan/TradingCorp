@@ -25,7 +25,8 @@ describe('AgencyGraph parallel execution', () => {
     const g = new AgencyGraph(AGENCIES['long-term']!, { parallel: false });
     expect(g.parallel).toBe(false);
     expect(g.nodeOrder).toEqual([
-      'orchestrator', 'data_ingestion', 'fundamental', 'technical', 'sentiment', 'risk', 'governance',
+      'orchestrator', 'data_ingestion', 'fundamental', 'technical', 'sentiment',
+      'bull_researcher', 'bear_researcher', 'risk', 'governance',
     ]);
   });
 
@@ -33,7 +34,8 @@ describe('AgencyGraph parallel execution', () => {
     const g = new AgencyGraph(AGENCIES['long-term']!, { parallel: true });
     expect(g.parallel).toBe(true);
     expect(g.nodeOrder).toEqual([
-      'orchestrator', 'data_ingestion', 'fundamental', 'technical', 'sentiment', 'risk', 'governance',
+      'orchestrator', 'data_ingestion', 'fundamental', 'technical', 'sentiment',
+      'bull_researcher', 'bear_researcher', 'risk', 'governance',
     ]);
   });
 
@@ -44,7 +46,8 @@ describe('AgencyGraph parallel execution', () => {
     expect(result.final_decision).toBeTruthy();
     const analysts = (result.analystTraces ?? []).map((t: any) => t.analyst).sort();
     // Every analyst in the agency must have produced a trace.
-    for (const id of ['data_ingestion', 'fundamental', 'technical', 'sentiment', 'risk', 'governance']) {
+    for (const id of ['data_ingestion', 'fundamental', 'technical', 'sentiment',
+      'bull_researcher', 'bear_researcher', 'risk', 'governance']) {
       expect(analysts).toContain(id);
     }
   });

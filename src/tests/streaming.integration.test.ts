@@ -63,6 +63,8 @@ describe('real-time per-analyst streaming (integration)', () => {
       'fundamental',
       'technical',
       'sentiment',
+      'bull_researcher',
+      'bear_researcher',
       'risk',
       'governance',
     ]);
@@ -96,9 +98,11 @@ describe('real-time per-analyst streaming (integration)', () => {
     expect(Array.isArray(result.analystTraces)).toBe(true);
     // Parity invariant: the SET of analysts is identical regardless of whether
     // the run is serial or parallel. Stage-2 analysts finish in non-deterministic
-    // order under parallel execution, so assert the set (sorted), not the order.
-    const ids = result.analystTraces.map((t: any) => t.analyst).sort();
-    expect(ids).toEqual([
+    // order under parallel execution, so assert the SET, not the order.
+    const idSet = new Set(result.analystTraces.map((t: any) => t.analyst));
+    expect(idSet).toEqual(new Set([
+      'bull_researcher',
+      'bear_researcher',
       'data_ingestion',
       'fundamental',
       'governance',
@@ -106,7 +110,7 @@ describe('real-time per-analyst streaming (integration)', () => {
       'risk',
       'sentiment',
       'technical',
-    ]);
+    ]));
 
     // Every trace must expose the four drill-down pillars.
     for (const trace of result.analystTraces) {

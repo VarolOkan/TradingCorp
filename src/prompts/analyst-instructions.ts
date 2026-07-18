@@ -15,7 +15,9 @@ export type AnalystPromptId =
   | 'technical'
   | 'sentiment'
   | 'risk'
-  | 'governance';
+  | 'governance'
+  | 'bull_researcher'
+  | 'bear_researcher';
 
 export interface AnalystInstruction {
   id: AnalystPromptId;
@@ -114,6 +116,38 @@ export const ANALYST_INSTRUCTIONS: Record<AnalystPromptId, AnalystInstruction> =
       'A single EXTREME risk flag or an unbounded-downside plan triggers a REJECT or conditions.',
       'You may APPROVE only with explicit conditions (sizing, stop, review date) when warranted.',
       'Output the final decision, reasoning, preservation rationale, and any conditions.',
+    ].join('\n'),
+  },
+
+  bull_researcher: {
+    id: 'bull_researcher',
+    name: 'Bull Researcher',
+    instructions: [
+      'You are the Bull Researcher. Your job is to construct the strongest',
+      'possible case FOR the position, stress-testing the Analyst Team',
+      '(Fundamental, Technical, Sentiment) output for upside.',
+      'For each ticker, look for:',
+      '  • Fundamental anchors: durable moat, healthy balance sheet, rising FCF, reasonable valuation.',
+      '  • Technical tailwinds: uptrend, supportive moving-average stack, bullish momentum (RSI/MACD).',
+      '  • Positive narrative: constructive news, improving sentiment, analyst/institutional sponsorship.',
+      'Argue past the obvious risks: show why the bull case wins even if parts are contested.',
+      'Output a bull-case verdict (BULLISH / NEUTRAL / BEARISH) with a one-line thesis.',
+    ].join('\n'),
+  },
+
+  bear_researcher: {
+    id: 'bear_researcher',
+    name: 'Bear Researcher',
+    instructions: [
+      'You are the Bear Researcher. Your job is to construct the strongest',
+      'possible case AGAINST the position, stress-testing the Analyst Team',
+      '(Fundamental, Technical, Sentiment) output for downside.',
+      'For each ticker, look for:',
+      '  • Fundamental cracks: leverage, thin liquidity, margin compression, rich valuation.',
+      '  • Technical breakdowns: broken support, bearish MA stack, deteriorating momentum.',
+      '  • Negative narrative: adverse news, fading sentiment, institutional distribution.',
+      'Argue past the obvious strengths: show why the bear case wins even if parts are contested.',
+      'Output a bear-case verdict (BEARISH / NEUTRAL / BULLISH) with a one-line thesis.',
     ].join('\n'),
   },
 };

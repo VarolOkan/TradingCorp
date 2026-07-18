@@ -758,8 +758,8 @@ export interface AnalystTrace {
   analyst: AnalystId;
   /** Human-readable analyst name. */
   name: string;
-  /** Pipeline stage (1 = intake, 2 = analysis, 3 = decision). */
-  stage: 1 | 2 | 3;
+  /** Pipeline stage (1 = intake, 2 = analysis, 3 = debate/research, 4 = decision). */
+  stage: 1 | 2 | 3 | 4;
   /**
    * The instruction prompt the analyst operated under (adapted from
    * TradingAgents' agent system prompts). This is what the user sees in the

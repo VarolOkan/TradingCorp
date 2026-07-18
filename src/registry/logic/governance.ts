@@ -101,6 +101,18 @@ export async function governanceHandler(
           : `Seeded review: no ingested data present; verdicts use parity fallback (illustrative).`)
       : undefined;
 
+    // Phase 1 (Bull/Bear debate): reflect the researchers' opposing cases.
+    // Advisory only — it surfaces in the trace + reasoning but never overrides
+    // the preservation-first veto. Absent (parity) when the debate didn't run.
+    const debate = extractDebate(state);
+    const netLean = netDebateLean(debate.bull, debate.bear);
+    const debateNotes: string[] = [];
+    if (debate.bull || debate.bear) {
+      if (debate.bull) debateNotes.push(`Bull case: ${debate.bull.verdict} (${debate.bull.score}/100) — ${debate.bull.summary}`);
+      if (debate.bear) debateNotes.push(`Bear case: ${debate.bear.verdict} (${debate.bear.score}/100) — ${debate.bear.summary}`);
+      if (netLean) debateNotes.push(`Net debate lean: ${netLean}.`);
+    }
+
     updatedState = {
       ...updatedState,
       messages: [
@@ -115,6 +127,7 @@ export async function governanceHandler(
             overallDecision,
             summary: generateDecisionSummary(overallDecision, decisions, riskAssessments),
             ...(reflectionNote ? { reflection: reflectionNote } : {}),
+            ...(debateNotes.length ? { debate: debateNotes } : {}),
           },
         },
       ],
@@ -137,21 +150,23 @@ export async function governanceHandler(
           risk_level: riskAssessments[ticker]?.risk_level,
           preservation_rationale: decisions[ticker]?.preservation_rationale,
           conditions: decisions[ticker]?.conditions,
+          debateLean: netLean ?? undefined,
         },
-        sources: ['Fundamental/Technical/Sentiment/Risk outputs', 'Preservation-first policy'],
+        sources: ['Fundamental/Technical/Sentiment/Risk outputs', 'Bull/Bear researcher debate', 'Preservation-first policy'],
       })),
       weighting: [
         { label: 'Preservation (downside) test', inputs: ['risk_level', 'stop_loss_suggestion'], weight: 0.5, rationale: 'If downside is not bounded by stops/sizing, the plan fails the test.', contribution: 50, scale: '0..100 veto weight' },
         { label: 'Consensus alignment', inputs: ['fundamental', 'technical', 'sentiment'], weight: 0.3, rationale: 'Conflicting analyst verdicts reduce confidence and invite conditions.', contribution: 30, scale: '0..100 veto weight' },
         { label: 'Risk-level override', inputs: ['risk_level'], weight: 0.2, rationale: 'Any EXTREME risk flag escalates to REJECT or strict conditions.', contribution: 20, scale: '0..100 veto weight' },
+        ...(netLean ? [{ label: 'Bull/Bear debate lean', inputs: ['bull_research', 'bear_research'], weight: 0, rationale: `Advisory signal only (${netLean}) — does not override the preservation test.`, contribution: 0, scale: 'advisory' } as any] : []),
       ],
       output: {
         verdict: overallDecision.decision,
         score: overallDecision.confidence,
         summary: generateDecisionSummary(overallDecision, decisions, riskAssessments),
-        details: { overall: overallDecision, perTicker: decisions },
+        details: { overall: overallDecision, perTicker: decisions, debate: debateNotes.length ? { bull: debate.bull, bear: debate.bear, netLean } : undefined },
       },
-      notes: [overallDecision.preservation_rationale, ...(reflectionNote ? [reflectionNote] : [])].filter(Boolean) as string[],
+      notes: [overallDecision.preservation_rationale, ...(reflectionNote ? [reflectionNote] : []), ...debateNotes].filter(Boolean) as string[],
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'governance', {
@@ -281,6 +296,44 @@ function performGovernanceReview(
   };
 
   return { decision, riskAssessment };
+}
+
+/** Pull the Bull/Bear researcher verdicts off the pipeline state so the
+ *  governance gatekeeper can reflect the debate in its decision. Returns the
+ *  per-channel {verdict, score, summary} for each researcher, or undefined
+ *  entries when the debate step didn't run (unit-test isolation / parity). */
+function extractDebate(state: AgentState | undefined): {
+  bull?: { verdict: string; score: number; summary: string };
+  bear?: { verdict: string; score: number; summary: string };
+} {
+  const out: { bull?: any; bear?: any } = {};
+  if (!state || !Array.isArray(state.messages)) return out;
+  for (const msg of state.messages) {
+    const data = (msg as any).data;
+    if (!data || !Array.isArray(data.channels)) continue;
+    if (data.channels.includes('bull_research') && data.analyses) {
+      const r = data.analyses;
+      const first = r[Object.keys(r)[0]];
+      if (first) out.bull = { verdict: first.verdict, score: first.score, summary: first.summary };
+    }
+    if (data.channels.includes('bear_research') && data.analyses) {
+      const r = data.analyses;
+      const first = r[Object.keys(r)[0]];
+      if (first) out.bear = { verdict: first.verdict, score: first.score, summary: first.summary };
+    }
+  }
+  return out;
+}
+
+/** Net debate lean from the bull/bear scores: BULLISH if bull >> bear,
+ *  BEARISH if bear >> bull, else BALANCED. Advisory only — never overrides the
+ *  preservation-first veto. */
+function netDebateLean(bull?: { score: number }, bear?: { score: number }): 'BULLISH' | 'BEARISH' | 'BALANCED' | null {
+  if (bull == null || bear == null) return null;
+  const delta = (bull.score ?? 0) - (bear.score ?? 0);
+  if (delta >= 15) return 'BULLISH';
+  if (delta <= -15) return 'BEARISH';
+  return 'BALANCED';
 }
 
 /** Pull the risk analyst's per-ticker assessment off the pipeline state so

@@ -305,7 +305,22 @@ installed) or run `graphify install`.
 > Confirm the exact install command from the live docs (`/docs/mcp-tools`) when
 > piloting.
 
-## 11. Documentation index (source of truth)
+## 11. Logging — use `src/utils/logger.ts`, not `console.*`
+
+Backend/runtime code (server, orchestration, registry logic, nodes) MUST log
+through the project logger at `src/utils/logger.ts` — `logger.info / warn /
+error / debug(...)` — **not** `console.log` / `console.trace` / `console.warn`.
+Reasons:
+- the logger honors `LOG_LEVEL` and routes to file + console uniformly; raw
+  `console.*` bypasses level filtering and pollutes the structured log stream.
+- during debugging, prefer a proper test assertion or a `logger.debug(...)` over
+  scattering `console.log` through the source (it gets committed by accident and
+  is hard to grep out later).
+
+Frontend (React/Vite) uses the browser `console` — that's fine; this rule is
+backend-only.
+
+## 12. Documentation index (source of truth)
 
 - `README.md` — project overview, config, request/response contract, phased plan.
 - `docs/README.md` — overview + doc map.

@@ -153,11 +153,11 @@ export class AgencyGraph {
     const ids = resolved.map((d) => d.id);
     const stage1 = resolved.filter((d) => (d.stage ?? 1) === 1);
     const stage2 = resolved.filter((d) => (d.stage ?? 2) === 2);
-    const stage3 = resolved.filter((d) => (d.stage ?? 3) === 3);
     const lastStage1 = stage1.length > 0 ? stage1[stage1.length - 1]!.id : resolved[0]!.id;
-    const stage2Leaves = stage2.filter(
-      (d) => !stage2.some((other) => (other.dependsOn ?? []).includes(d.id)),
-    );
+    // Leaves of a tier = nodes in that tier no other node depends on. Used as
+    // the default fan-in source for the next tier when a node omits dependsOn.
+    const leavesOf = (stage: number) =>
+      resolved.filter((d) => (d.stage ?? 2) === stage && !resolved.some((o) => (o.dependsOn ?? []).includes(d.id)));
     const edges: Array<[string, string]> = [];
     for (const def of resolved) {
       const id = def.id;
@@ -176,7 +176,9 @@ export class AgencyGraph {
       } else if (stage === 2) {
         edges.push([lastStage1, id]);
       } else {
-        for (const d of stage2Leaves) edges.push([d.id, id]);
+        // Stages 3+ (debate, decision, ...): fan in from the leaves of the
+        // immediately-previous tier when no explicit dependsOn is given.
+        for (const d of leavesOf(stage - 1)) edges.push([d.id, id]);
       }
     }
     return edges;
@@ -254,9 +256,11 @@ export class AgencyGraph {
       if (t === END) continue;
       this.workflow.addEdge(f, t);
     }
-    // Final node → END. Prefer the last stage-3 (decision); else the last node.
-    const stage3 = resolved.filter((d) => (d.stage ?? 3) === 3);
-    const endNode = stage3.length > 0 ? stage3[stage3.length - 1]!.id : resolved[resolved.length - 1]!.id;
+    // Final node → END. Prefer the highest-stage (decision) node; else the
+    // last node. With the 4-tier model this is the stage-4 gatekeeper, but the
+    // lookup is stage-agnostic so adding tiers never breaks END wiring.
+    const endNode = resolved.reduce((acc, d) =>
+      (d.stage ?? 0) > (acc.stage ?? 0) ? d : acc, resolved[0]!).id;
     this.workflow.addEdge(endNode, END);
   }
 
