@@ -3893,3 +3893,28 @@ body {
 .markdown ul, .markdown ol { padding-left: 1.3rem; margin: 0.4rem 0; }
 .markdown blockquote { border-left: 3px solid #334155; margin: 0.5rem 0; padding-left: 0.8rem; color: #94a3b8; }
 
+/* Brand header (TradingCorp wordmark, colored per brand palette) */
+.app-header {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.2rem 0.7rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  margin-bottom: 0.6rem;
+}
+.app-wordmark {
+  font-family: 'Playfair Display', 'Futura', 'Century Gothic', 'Avenir Next', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-weight: 800;
+  font-size: 1.7rem;
+  letter-spacing: -0.5px;
+  color: #e2e8f0;
+  background: linear-gradient(90deg, #e2e8f0 0%, #cbd5e1 60%, #7dd3fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.app-wordmark-accent {
+  color: #7dd3fc;
+  -webkit-text-fill-color: #7dd3fc;
+  text-shadow: 0 0 14px rgba(56, 189, 248, 0.45);
+}
+

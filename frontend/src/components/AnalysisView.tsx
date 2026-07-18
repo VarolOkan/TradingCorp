@@ -183,6 +183,11 @@ export function AnalysisView({
   // Phase 5: compare mode toggle — enabled when 2-5 tickers are in the current
   // run so the user can switch the market-row into a relative-performance view.
   const [compareMode, setCompareMode] = useState(false);
+  // Compare requires a completed [Analyze] run covering the entered tickers, so
+  // the side-by-side verdicts are populated from real agent output. (The chart +
+  // correlation fetch live history regardless, but the verdicts need the run.)
+  const runCoversPills =
+    wallTickers.length > 0 && symbolPills.every((t) => wallTickers.includes(t));
   // Phase F: shipped flavor sets per analyst id (for the current agency), keyed by analyst id.
   // Now stores the FULL GetAnalystFlavorsResponse (incl. instructions + selectedId) so the
   // trace drawer can show the LIVE (just-edited) Role & Instructions immediately after a save,
@@ -386,22 +391,31 @@ export function AnalysisView({
           panels. The card also previews immediately on a Watchlist chip click or
           leaving the Ticker symbols field (previewTickers) — that path does NOT
           start the agency run; only [Analyze] populates wallTickers. */}
-      {/* Compare affordance is driven by the ENTERED pills so it is available
-          as soon as 2+ tickers are typed — independent of any analysis run. */}
+      {/* Compare affordance: enabled only once the entered tickers have been
+          analyzed (a completed [Analyze] run), so the side-by-side verdicts are
+          populated from real agent output. Typing 2–6 pills is necessary but not
+          sufficient — the user must run [Analyze] first; otherwise we show a
+          hint instead of a button that would render empty verdicts. */}
       {symbolPills.length >= 1 && (
         symbolPills.length >= 2 && symbolPills.length <= 6 ? (
-          <div className="compare-toggle-row" data-testid="compare-toggle-row">
-            <button
-              type="button"
-              className={`compare-toggle ${compareMode ? 'active' : ''}`}
-              aria-pressed={compareMode}
-              data-testid="compare-toggle"
-              onClick={() => setCompareMode((v) => !v)}
-            >
-              {compareMode ? 'Exit compare' : 'Compare tickers'}
-            </button>
-            <span className="compare-hint">Comparing {symbolPills.length} tickers</span>
-          </div>
+          runCoversPills ? (
+            <div className="compare-toggle-row" data-testid="compare-toggle-row">
+              <button
+                type="button"
+                className={`compare-toggle ${compareMode ? 'active' : ''}`}
+                aria-pressed={compareMode}
+                data-testid="compare-toggle"
+                onClick={() => setCompareMode((v) => !v)}
+              >
+                {compareMode ? 'Exit compare' : 'Compare tickers'}
+              </button>
+              <span className="compare-hint">Comparing {symbolPills.length} tickers</span>
+            </div>
+          ) : (
+            <span className="compare-hint" data-testid="compare-hint-run">
+              Run [Analyze] on these tickers first to compare their verdicts.
+            </span>
+          )
         ) : (
           <span className="compare-hint" data-testid="compare-hint-guide">
             Enter 2–6 tickers as pills in “Ticker symbols” to compare them.
@@ -410,32 +424,43 @@ export function AnalysisView({
       )}
 
       {/* Main area: CompareView when comparing, otherwise the per-ticker cards
-          (from the last run / preview). When there's no run yet, show the
-          entered pill collection UNIONed with any previewed symbols so the
-          graphs reflect everything the user has defined — not just the last
-          one clicked. */}
-      {compareMode && symbolPills.length >= 2 && symbolPills.length <= 6 ? (
+          (from the last run / preview). The displayed set is always filtered to
+          the tickers currently in the input (symbolPills): removing a pill must
+          remove that ticker's chart. After a run, show only the run's tickers
+          that are still in the input; before any run, show the entered pills
+          UNIONed with any previewed symbols. */}
+      {compareMode && runCoversPills && symbolPills.length >= 2 && symbolPills.length <= 6 ? (
         <CompareView tickers={symbolPills} result={result} />
       ) : (
-        (wallTickers.length > 0 || symbolPills.length > 0 || previewTickers.length > 0) && (
-          <div className="market-row" data-testid="market-row">
-            {/* Prefer the run's tickers so a just-submitted [Analyze] instantly
-                replaces the preview; otherwise show the collection: entered
-                pills UNION previewed symbols (deduped, pills first). */}
-            {(wallTickers.length > 0
-              ? wallTickers
-              : [...new Set([...symbolPills, ...previewTickers])]
-            ).map((t) => (
-              <MarketDataCard
-                key={t}
-                symbol={t}
-                agencyId={agencyId}
-                technical={result?.technical_analysis?.[t] ?? null}
-                sentiment={result?.sentiment_analysis?.[t] ?? null}
-              />
-            ))}
-          </div>
-        )
+        (() => {
+          // The input pills are the source of truth for what the user wants
+          // graphed. Filter the active data source (the last run if any, else
+          // the preview set) down to tickers still in the input, so removing a
+          // pill removes that ticker's chart. Fall back to the pills themselves
+          // when nothing from the run/preview overlaps the input.
+          const source = wallTickers.length > 0 ? wallTickers : previewTickers;
+          let displayTickers = source.filter((t) => symbolPills.includes(t));
+          if (displayTickers.length === 0) {
+            displayTickers = symbolPills.length > 0
+              ? symbolPills
+              : [...new Set([...symbolPills, ...previewTickers])];
+          }
+          return (
+            displayTickers.length > 0 && (
+              <div className="market-row" data-testid="market-row">
+                {displayTickers.map((t) => (
+                  <MarketDataCard
+                    key={t}
+                    symbol={t}
+                    agencyId={agencyId}
+                    technical={result?.technical_analysis?.[t] ?? null}
+                    sentiment={result?.sentiment_analysis?.[t] ?? null}
+                  />
+                ))}
+              </div>
+            )
+          );
+        })()
       )}
 
       {!connected && (

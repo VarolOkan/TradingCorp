@@ -41,26 +41,47 @@ export function NormalizedPerformanceChart({
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
 
-  const { paths, yTicks, minLen } = useMemo(() => {
+  // Compute the y-axis range from the ACTUAL normalized data so lines that dip
+  // below 100 (a normal loss) or spike above 110 are not clipped. Baseline 100
+  // is always included; we pad a little beyond the extremes for breathing room.
+  const { paths, yTicks, minLen, yLo, yHi } = useMemo(() => {
     const norm = series.map((s) => normalizeToBase(s.points));
     const minLen = norm.reduce(
       (m, arr) => (arr.length ? Math.min(m, arr.length) : m),
       Infinity,
     );
     const safeLen = minLen === Infinity ? 0 : minLen;
+    let dataMin = 100;
+    let dataMax = 100;
+    for (const arr of norm) {
+      for (const v of arr) {
+        if (v < dataMin) dataMin = v;
+        if (v > dataMax) dataMax = v;
+      }
+    }
+    // Pad 8% beyond the extremes (and at least a couple points) so the lines
+    // aren't glued to the top/bottom edges.
+    const pad = Math.max((dataMax - dataMin) * 0.08, 2);
+    const yMin = Math.min(100, dataMin) - pad;
+    const yMaxReal = Math.max(100, dataMax) + pad;
+    const lo = yMin;
+    const hi = yMaxReal;
     const paths = norm.map((arr) => {
       const sliced = safeLen ? arr.slice(0, safeLen) : arr;
       return sliced
         .map((v, i) => {
           const x = padL + (safeLen <= 1 ? 0 : (i / (safeLen - 1)) * innerW);
-          const y = padT + innerH - ((v - 100) / (yMax - 100)) * innerH;
+          const y = padT + innerH - ((v - lo) / (hi - lo)) * innerH;
           return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
         })
         .join(' ');
     });
-    const yTicks = [100, 105, 110].filter((v) => v <= yMax);
-    return { paths, yTicks, minLen: safeLen };
-  }, [series, innerW, innerH, yMax, padL, padT]);
+    // Y ticks: baseline 100 plus a couple of round-ish reference lines.
+    const yTicks = [Math.round(lo), 100, Math.round(hi)].filter(
+      (v, i, a) => a.indexOf(v) === i && v >= lo && v <= hi,
+    );
+    return { paths, yTicks, minLen: safeLen, yLo: lo, yHi: hi };
+  }, [series, innerW, innerH, padL, padT]);
 
   return (
     <div className="norm-chart" data-testid="norm-chart">
@@ -74,15 +95,15 @@ export function NormalizedPerformanceChart({
         {/* baseline at 100 */}
         <line
           x1={padL}
-          y1={padT + innerH - ((100 - 100) / (yMax - 100)) * innerH}
+          y1={padT + innerH - ((100 - yLo) / (yHi - yLo)) * innerH}
           x2={width - padR}
-          y2={padT + innerH}
+          y2={padT + innerH - ((100 - yLo) / (yHi - yLo)) * innerH}
           stroke="rgba(148,163,184,0.35)"
           strokeDasharray="3 3"
           data-testid="norm-baseline"
         />
         {yTicks.map((v) => {
-          const y = padT + innerH - ((v - 100) / (yMax - 100)) * innerH;
+          const y = padT + innerH - ((v - yLo) / (yHi - yLo)) * innerH;
           return (
             <g key={v}>
               <text x={padL - 6} y={y + 3} textAnchor="end" className="norm-axis-label" data-testid="norm-y-tick">

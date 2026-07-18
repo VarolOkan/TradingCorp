@@ -32,3 +32,6 @@ tsconfig.tsbuildinfo
 !.graphify/graph.json
 !.graphify/GRAPH_REPORT.md
 graphify-out/
+.my_data/**
+promotion/**
+

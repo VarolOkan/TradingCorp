@@ -6,7 +6,30 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import AnalysisView from '../components/AnalysisView';
 
 function fakeSocket() {
-  return { on: () => {}, off: () => {}, emit: () => {}, connected: true } as any;
+  const handlers: Record<string, (payload?: any) => void> = {};
+  return {
+    on: (evt: string, cb: (payload?: any) => void) => {
+      handlers[evt] = cb;
+    },
+    off: () => {},
+    emit: (evt: string, payload?: any) => {
+      // Simulate a completed run: analysis_start -> analysis_complete so the
+      // run flips running=false (enabling the pill ×) and a result is set.
+      if (evt === 'request_analysis') {
+        handlers['analysis_start']?.({ tickers: payload?.tickers ?? [] });
+        handlers['analysis_complete']?.({
+          tickers: payload?.tickers ?? [],
+          decision: 'APPROVE',
+          confidence: 0.5,
+          company_name: 'Test Co',
+          technical_analysis: {},
+          sentiment_analysis: {},
+          analystTraces: [],
+        });
+      }
+    },
+    connected: true,
+  } as any;
 }
 
 // getQuote drives the no-run preview validation. NOTREAL throws (not found).
@@ -42,16 +65,57 @@ describe('Compare entry UX (pill input)', () => {
     expect(guide.textContent).toMatch(/2–6 tickers/);
   });
 
-  it('2 tickers: Compare button appears with correct count and toggles into CompareView', async () => {
+  it('2 tickers but no run: prompts to Analyze first (no empty verdicts)', async () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
     addTicker('AAPL');
     addTicker('MSFT');
+    // Without a completed [Analyze] run covering the tickers, the Compare button
+    // must NOT appear — instead a hint tells the user to run Analyze first.
+    expect(screen.queryByTestId('compare-toggle')).toBeNull();
+    const hint = await screen.findByTestId('compare-hint-run');
+    expect(hint.textContent).toMatch(/Run \[Analyze\]/);
+  });
+
+  it('2 tickers after a completed Analyze run: Compare button appears, verdicts populated', async () => {
+    // Give the completed run real per-ticker verdicts so the side-by-side table
+    // is populated (not all "-").
+    const socket = fakeSocket();
+    const handlers: Record<string, (p?: any) => void> = {};
+    (socket.on as any) = (e: string, cb: (p?: any) => void) => { handlers[e] = cb; };
+    (socket.emit as any) = (e: string, p?: any) => {
+      if (e === 'request_analysis') {
+        handlers['analysis_start']?.({ tickers: p?.tickers ?? [] });
+        handlers['analysis_complete']?.({
+          tickers: p?.tickers ?? [],
+          decision: 'APPROVE',
+          confidence: 0.5,
+          company_name: 'Test Co',
+          technical_analysis: {
+            AAPL: { technical_score: 72, verdict: 'BULLISH', data_source: 'yahoo:real' },
+            MSFT: { technical_score: 80, verdict: 'BULLISH', data_source: 'yahoo:real' },
+          },
+          sentiment_analysis: {
+            AAPL: { sentiment_score: 40, data_source: 'finnhub:live-news' },
+            MSFT: { sentiment_score: 55, data_source: 'finnhub:live-news' },
+          },
+          analystTraces: [],
+        });
+      }
+    };
+    render(<AnalysisView socket={socket} connected={true} />);
+    addTicker('AAPL');
+    addTicker('MSFT');
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
     const toggle = await screen.findByTestId('compare-toggle');
     expect(toggle.textContent).toContain('Compare tickers');
     fireEvent.click(toggle);
     expect(await screen.findByTestId('compare-view')).toBeTruthy();
     expect(screen.getByText('Relative performance (rebased to 100)')).toBeTruthy();
     expect(screen.getByText('Return correlation')).toBeTruthy();
+    expect(screen.getByText('Side-by-side verdicts')).toBeTruthy();
+    // Verdicts come from the run, not "-".
+    expect(screen.getByTestId('verdict-tech-AAPL').textContent).toMatch(/BULLISH/);
+    expect(screen.getByTestId('verdict-sent-MSFT').textContent).toMatch(/55/);
   });
 
   it('caps at 6 pills in the input box', async () => {
@@ -93,5 +157,22 @@ describe('Compare entry UX (pill input)', () => {
     await waitFor(() => expect(getQuoteMock).toHaveBeenCalled());
     expect(screen.queryByTestId('pill-NOTREAL')).toBeNull();
     expect(screen.queryByTestId('market-card-NOTREAL')).toBeNull();
+  });
+
+  it('removing a pill removes that ticker\'s chart (even after Analyze)', async () => {
+    render(<AnalysisView socket={fakeSocket()} connected={true} />);
+    addTicker('AAPL');
+    addTicker('MSFT');
+    // Run the analysis — wallTickers is populated synchronously by handleSubmit.
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
+    await waitFor(() => expect(screen.getByTestId('market-card-AAPL')).toBeTruthy());
+    expect(screen.getByTestId('market-card-MSFT')).toBeTruthy();
+
+    // Remove the MSFT pill — its chart must disappear, AAPL's must remain.
+    fireEvent.click(screen.getByTestId('pill-remove-MSFT'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('market-card-MSFT')).toBeNull(),
+    );
+    expect(screen.getByTestId('market-card-AAPL')).toBeTruthy();
   });
 });

@@ -153,7 +153,7 @@ function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <h1>TradingCorp</h1>
+        <span class="app-wordmark" data-testid="app-wordmark">Trading<span class="app-wordmark-accent">Corp</span></span>
         <div className="topbar-actions">
           <span className={`status ${connState === 'connected' ? 'online' : 'offline'}`}
             data-testid="conn-status"
