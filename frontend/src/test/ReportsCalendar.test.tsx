@@ -108,3 +108,121 @@ describe('ReportsCalendar — Raw data closes the date selector', () => {
     expect(reloadMock).toHaveBeenCalled();
   });
 });
+
+describe('ReportsCalendar — ticker column label', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows MULTI X for a multi-symbol report (X = symbol count)', async () => {
+    const multiDay = '2026-07-13';
+    const multiRid = 'report-long-term-AAPL-MSFT-TSLA-09-08-07';
+    const multiSummary = {
+      id: multiRid,
+      userId: 'default',
+      day: multiDay,
+      agencyId: 'long-term',
+      tickers: ['AAPL', 'MSFT', 'TSLA'],
+      companyName: undefined,
+      generatedAt: `${multiDay}T09:08:07`,
+      files: { pdf: `${multiRid}.pdf`, md: `${multiRid}.md`, html: `${multiRid}.html`, json: `${multiRid}.json` },
+    };
+    vi.spyOn(reportClient, 'listReports').mockResolvedValue({ ok: true, count: 1, byDay: { [multiDay]: [multiSummary] } });
+    render(<ReportsCalendar />);
+    fireEvent.click(screen.getByTestId('reports-btn'));
+    const dayBtn = await screen.findByLabelText(multiDay);
+    fireEvent.click(dayBtn);
+    const item = await screen.findByTestId(`report-item-${multiRid}`);
+    expect(within(item).getByText('MULTI 3')).toBeInTheDocument();
+  });
+
+  it('shows the single symbol for a one-symbol report', async () => {
+    // Reuse the single-symbol summary from the outer scope.
+    render(<ReportsCalendar />);
+    vi.spyOn(reportClient, 'listReports').mockResolvedValue({ ok: true, count: 1, byDay: { [DAY]: [summary] } });
+    fireEvent.click(screen.getByTestId('reports-btn'));
+    const d = await screen.findByLabelText(DAY);
+    fireEvent.click(d);
+    const item = await screen.findByTestId(`report-item-${RID}`);
+    expect(within(item).getByText('ACME')).toBeInTheDocument();
+  });
+
+  it('hides the redundant company span for a multi-symbol report (MULTI already conveys it)', async () => {
+    const multiDay = '2026-07-14';
+    const multiRid = 'report-long-term-AAPL-MSFT-TSLA-NVDA-09-08-07';
+    const multiSummary = {
+      id: multiRid,
+      userId: 'default',
+      day: multiDay,
+      agencyId: 'long-term',
+      tickers: ['AAPL', 'MSFT', 'TSLA', 'NVDA'],
+      companyName: 'AAPL, MSFT, TSLA, NVDA', // backend joins tickers for multi-symbol runs
+      generatedAt: `${multiDay}T09:08:07`,
+      files: { pdf: `${multiRid}.pdf`, md: `${multiRid}.md`, html: `${multiRid}.html`, json: `${multiRid}.json` },
+    };
+    vi.spyOn(reportClient, 'listReports').mockResolvedValue({ ok: true, count: 1, byDay: { [multiDay]: [multiSummary] } });
+    render(<ReportsCalendar />);
+    fireEvent.click(screen.getByTestId('reports-btn'));
+    const dayBtn = await screen.findByLabelText(multiDay);
+    fireEvent.click(dayBtn);
+    const item = await screen.findByTestId(`report-item-${multiRid}`);
+    // MULTI 4 label is present...
+    expect(within(item).getByText('MULTI 4')).toBeInTheDocument();
+    // ...but the joined-symbols company text is NOT duplicated on the right.
+    expect(within(item).queryByText('AAPL, MSFT, TSLA, NVDA')).not.toBeInTheDocument();
+  });
+});
+
+describe('ReportsCalendar — hover tooltip', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows the run tickers in a tooltip only after a ~500ms hover', async () => {
+    render(<ReportsCalendar />);
+    vi.spyOn(reportClient, 'listReports').mockResolvedValue({ ok: true, count: 1, byDay: { [DAY]: [summary] } });
+    fireEvent.click(screen.getByTestId('reports-btn'));
+    const d = await screen.findByLabelText(DAY);
+    fireEvent.click(d);
+    const item = await screen.findByTestId(`report-item-${RID}`);
+    const wrap = item.closest('.reports-item-wrap') as HTMLElement;
+
+    // Immediately on hover: no tooltip yet (the 500ms delay has not elapsed).
+    fireEvent.mouseEnter(wrap);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+    // After the delay: tooltip appears with the ticker.
+    const tip = await screen.findByRole('tooltip', { timeout: 1500 });
+    expect(tip).toHaveTextContent('ACME');
+
+    // Leaving clears it.
+    fireEvent.mouseLeave(wrap);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('multi-symbol run shows the full ticker list in the tooltip', async () => {
+    const multiDay = '2026-07-15';
+    const multiRid = 'report-long-term-AAPL-MSFT-TSLA-NVDA-09-08-07';
+    const multiSummary = {
+      id: multiRid,
+      userId: 'default',
+      day: multiDay,
+      agencyId: 'long-term',
+      tickers: ['AAPL', 'MSFT', 'TSLA', 'NVDA'],
+      companyName: 'AAPL, MSFT, TSLA, NVDA',
+      generatedAt: `${multiDay}T09:08:07`,
+      files: { pdf: `${multiRid}.pdf`, md: `${multiRid}.md`, html: `${multiRid}.html`, json: `${multiRid}.json` },
+    };
+    render(<ReportsCalendar />);
+    vi.spyOn(reportClient, 'listReports').mockResolvedValue({ ok: true, count: 1, byDay: { [multiDay]: [multiSummary] } });
+    fireEvent.click(screen.getByTestId('reports-btn'));
+    const dayBtn = await screen.findByLabelText(multiDay);
+    fireEvent.click(dayBtn);
+    const item = await screen.findByTestId(`report-item-${multiRid}`);
+    const wrap = item.closest('.reports-item-wrap') as HTMLElement;
+    fireEvent.mouseEnter(wrap);
+    const tip = await screen.findByRole('tooltip', { timeout: 1500 });
+    expect(tip).toHaveTextContent('4 symbols');
+    expect(tip).toHaveTextContent('AAPL, MSFT, TSLA, NVDA');
+  });
+});

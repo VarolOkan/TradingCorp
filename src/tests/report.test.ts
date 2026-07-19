@@ -8,6 +8,7 @@ import request from 'supertest';
 import express from 'express';
 import { buildReportModel, buildRawDataDump, renderMarkdown, renderHtml, renderPdfBuffer } from '../server/report';
 import { registerReportRoutes } from '../server/report-routes';
+import { readReportMeta } from '../server/report-routes';
 
 const SAMPLE_RESULT = {
   decision: 'APPROVE',
@@ -134,6 +135,55 @@ describe('report routes (persistence + download)', () => {
     // Must NOT mis-parse into `long` / `term-ACME`.
     expect(list.body.byDay && Object.values(list.body.byDay).flat()
       .some((r: any) => r.agencyId === 'long')).toBe(false);
+  });
+
+  it('POST multi-ticker report writes a durable .meta.json sidecar with the FULL ticker list', async () => {
+    const res = await request(app).post('/reports').send({
+      result: { ...SAMPLE_RESULT, tickers: ['AMZN', 'NVDA', 'TSLA', 'MSFT'] },
+      meta: { agencyId: 'long-term', tickers: ['AMZN', 'NVDA', 'TSLA', 'MSFT'], companyName: 'Basket' },
+    });
+    expect(res.body.ok).toBe(true);
+    const id = res.body.id as string; // report-long-term-AMZN-<HH-MM-SS>
+    // The filename stem encodes only ONE ticker, but the sidecar must carry all four.
+    const metaFile = path.join(tmpRoot, 'default', res.body.day, `${id}.meta.json`);
+    expect(fs.existsSync(metaFile)).toBe(true);
+    const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    expect(meta.tickers).toEqual(['AMZN', 'NVDA', 'TSLA', 'MSFT']);
+    expect(meta.agencyId).toBe('long-term');
+  });
+
+  it('readReportMeta falls back to the .json dump (and backfills the sidecar) for pre-sidecar reports', () => {
+    const dayDir = fs.mkdtempSync(path.join(os.tmpdir(), 'report-meta-'));
+    const stem = 'report-long-term-AMZN-09-08-07';
+    // No sidecar yet, but a raw-data .json dump exists (as all reports have).
+    expect(readReportMeta(dayDir, stem)).toBeNull();
+    fs.writeFileSync(path.join(dayDir, `${stem}.json`), JSON.stringify({
+      reportId: stem, agencyId: 'long-term', tickers: ['AMZN', 'NVDA', 'TSLA', 'MSFT'],
+      companyName: 'Basket', generatedAt: '2026-07-10T09:08:07', ingested: null,
+    }));
+    const meta = readReportMeta(dayDir, stem);
+    expect(meta).not.toBeNull();
+    expect(meta!.tickers).toEqual(['AMZN', 'NVDA', 'TSLA', 'MSFT']);
+    // The sidecar was lazily backfilled, so the next read is cheap + durable.
+    expect(fs.existsSync(path.join(dayDir, `${stem}.meta.json`))).toBe(true);
+    const reread = readReportMeta(dayDir, stem);
+    expect(reread!.tickers).toEqual(['AMZN', 'NVDA', 'TSLA', 'MSFT']);
+  });
+
+  it('lists exactly one row per report — the .meta.json sidecar is NOT scanned as a duplicate', async () => {
+    const post = await request(app).post('/reports').send({
+      result: { ...SAMPLE_RESULT, tickers: ['AMZN', 'NVDA', 'TSLA', 'MSFT'] },
+      meta: { agencyId: 'long-term', tickers: ['AMZN', 'NVDA', 'TSLA', 'MSFT'], companyName: 'Basket' },
+    });
+    const id = post.body.id as string;
+    const list = await request(app).get('/reports');
+    const all = Object.values(list.body.byDay).flat() as any[];
+    // The .meta.json sidecar must not be scanned as a phantom duplicate row.
+    expect(all.some((r: any) => r.id.endsWith('.meta'))).toBe(false);
+    // This report's id appears exactly once, with the full ticker list.
+    const matches = all.filter((r: any) => r.id === id);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!.tickers).toEqual(['AMZN', 'NVDA', 'TSLA', 'MSFT']);
   });
 
   it('GET /reports/:id?format=pdf streams a PDF with attachment header', async () => {
@@ -304,9 +354,9 @@ describe('report routes (persistence + download)', () => {
     }
     const del = await request(app).delete(`/reports/${encodeURIComponent(id)}`);
     expect(del.body.ok).toBe(true);
-    expect(del.body.removed).toBe(4);
+    expect(del.body.removed).toBe(5); // md, html, pdf, json + the .meta.json sidecar
     // Files are gone and the report is no longer listed.
-    for (const ext of ['md', 'html', 'pdf', 'json']) {
+    for (const ext of ['md', 'html', 'pdf', 'json', 'meta.json']) {
       expect(fs.existsSync(path.join(tmpRoot, 'default', day, `${id}.${ext}`))).toBe(false);
     }
     const list = await request(app).get('/reports');

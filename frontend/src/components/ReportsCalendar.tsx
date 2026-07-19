@@ -3,7 +3,7 @@
 // saved reports are highlighted + clickable; selecting a day lists the runs
 // (agency + ticker + time) for that day, and clicking a run opens the
 // Markdown report in an in-app modal (ReportModal).
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { listReports, deleteReport, fetchReportRawData, type ReportSummary } from '../api/reportClient';
 import ReportModal from './ReportModal';
 import RawDataDrawer, { type RawDataDump } from './RawDataDrawer';
@@ -17,9 +17,14 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 function displayOf(r: ReportSummary) {
   const m = /report-(.+)-(\d{2})-(\d{2})-(\d{2})$/.exec(r.id);
   const agency = r.agencyId || (m ? m[1] : 'unknown');
-  const ticker = (r.tickers && r.tickers[0]) || (m ? m[2] : '—');
+  // Multi-symbol reports show "MULTI X" (X = number of symbols); single-symbol
+  // reports show the symbol. Falls back to the filename-encoded ticker when the
+  // summary's ticker list is empty (older reports).
+  const tk = r.tickers && r.tickers.length ? r.tickers : (m ? [m[2]] : ['—']);
+  const ticker = tk.length > 1 ? `MULTI ${tk.length}` : tk[0];
+  const multi = tk.length > 1;
   const time = m ? `${m[2]}:${m[3]}:${m[4]}` : (r.generatedAt || '').slice(11, 19);
-  return { agency, ticker, time, company: r.companyName };
+  return { agency, ticker, time, company: r.companyName, multi };
 }
 
 export default function ReportsCalendar() {
@@ -34,6 +39,18 @@ export default function ReportsCalendar() {
   const [rawDump, setRawDump] = useState<RawDataDump | null>(null);
   const [rawError, setRawError] = useState<string | null>(null);
   const [rawLoading, setRawLoading] = useState(false);
+  // Small helper so ReportRow can trigger the raw-data drawer without
+  // re-declaring all the loading/error/dump state setters inline.
+  const setRawState = (id: string) => {
+    setOpen(false);
+    setRawError(null);
+    setRawLoading(true);
+    setRawDump(null);
+    fetchReportRawData(id)
+      .then((d) => { setRawDump(d); setRawId(id); })
+      .catch((e: Error) => { setRawError(e.message); })
+      .finally(() => setRawLoading(false));
+  };
   // Collapse long per-day lists behind a [More reports] toggle (>5 shown).
   const [showAll, setShowAll] = useState(false);
   // Per-report delete: confirmation popup state (the run pending deletion),
@@ -190,61 +207,9 @@ export default function ReportsCalendar() {
               {selected.length === 0 && (
                 <p className="reports-list-empty">No reports this day.</p>
               )}
-              {selected.slice(0, showAll ? selected.length : 5).map((r) => {
-                const { agency, ticker, time, company } = displayOf(r);
-                return (
-                  <div key={r.id} className="reports-item-wrap" data-testid={`report-item-wrap-${r.id}`}>
-                    <button
-                      type="button"
-                      className="reports-item"
-                      data-testid={`report-item-${r.id}`}
-                      onClick={() => setViewId(r.id)}
-                    >
-                      <span className="reports-item-agency">{agency}</span>
-                      <span className="reports-item-ticker">{ticker}</span>
-                      <span className="reports-item-time">{time}</span>
-                      {/* Inline delete ✕ — squeezed in right behind the timestamp,
-                          bright red. stopPropagation so it deletes instead of opening. */}
-                      <button
-                        type="button"
-                        className="reports-item-del-inline"
-                        data-testid={`report-del-${r.id}`}
-                        title="Delete this report and all its files"
-                        aria-label={`Delete ${r.id}`}
-                        disabled={deleting === r.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingDelete(r);
-                        }}
-                      >
-                        {deleting === r.id ? '…' : '✕'}
-                      </button>
-                      {company && company !== ticker && (
-                        <span className="reports-item-co">{company}</span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="reports-item-raw"
-                      data-testid={`report-raw-${r.id}`}
-                      onClick={() => {
-                        // Close the calendar popover so its date selector does
-                        // not overlay the raw-data drawer once it opens.
-                        setOpen(false);
-                        setRawError(null);
-                        setRawLoading(true);
-                        setRawDump(null);
-                        fetchReportRawData(r.id)
-                          .then((d) => { setRawDump(d); setRawId(r.id); })
-                          .catch((e: Error) => { setRawError(e.message); })
-                          .finally(() => setRawLoading(false));
-                      }}
-                    >
-                      {rawLoading && rawId === r.id ? '…' : 'Raw data'}
-                    </button>
-                  </div>
-                );
-              })}
+              {selected.slice(0, showAll ? selected.length : 5).map((r) => (
+                <ReportRow key={r.id} r={r} deleting={deleting} setPendingDelete={setPendingDelete} setRaw={setRawState} setOpen={setOpen} setViewId={setViewId} rawLoading={rawLoading} rawId={rawId} />
+              ))}
               {selected.length > 5 && (
                 <button
                   type="button"
@@ -327,5 +292,105 @@ export default function ReportsCalendar() {
 
       <RawDataDrawer dump={rawDump} onClose={() => { setRawDump(null); setRawId(null); }} />
     </>
+  );
+}
+
+// One report row (agency + ticker + time + delete ✕ + [Data]), plus a hover
+// tooltip that reveals the run's full ticker list after a 500ms delay. The
+// tooltip uses position:fixed and is rendered through a portal-free fixed
+// layer so the popover's overflow:auto scroll area cannot clip it.
+const HOVER_DELAY_MS = 500;
+
+function ReportRow({
+  r,
+  deleting,
+  setPendingDelete,
+  setRaw,
+  setOpen,
+  setViewId,
+  rawLoading,
+  rawId,
+}: {
+  r: ReportSummary;
+  deleting: string | null;
+  setPendingDelete: (r: ReportSummary) => void;
+  setRaw: (id: string) => void;
+  setOpen: (v: boolean) => void;
+  setViewId: (id: string | null) => void;
+  rawLoading: boolean;
+  rawId: string | null;
+}) {
+  const { agency, ticker, time, company, multi } = displayOf(r);
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Symbol list for the tooltip. For multi-symbol runs the count line (blue,
+  // bold) sits above the symbol list (orange, bold) — colors match the row's
+  // ticker text (#fbbf24) and the [Data] button text (#7dd3fc).
+  const symbols = (r.tickers && r.tickers.length ? r.tickers : [ticker]).join(', ');
+
+  const onEnter = (e: React.MouseEvent) => {
+    const t = e.currentTarget as HTMLElement;
+    hoverTimer.current = setTimeout(() => {
+      const rect = t.getBoundingClientRect();
+      // Center the bubble over the row; CSS translate(-50%, -100%-gap) lifts
+      // it above the button.
+      setTip({ x: rect.left + rect.width / 2, y: rect.top });
+    }, HOVER_DELAY_MS);
+  };
+  const onLeave = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    setTip(null);
+  };
+  // Cancel any pending timer if the row unmounts mid-hover.
+  useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); }, []);
+
+  return (
+    <div className="reports-item-wrap" data-testid={`report-item-wrap-${r.id}`} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <button
+        type="button"
+        className="reports-item"
+        data-testid={`report-item-${r.id}`}
+        onClick={() => setViewId(r.id)}
+      >
+        <span className="reports-item-agency">{agency}</span>
+        <span className="reports-item-ticker">{ticker}</span>
+        <span className="reports-item-time">{time}</span>
+        <button
+          type="button"
+          className="reports-item-del-inline"
+          data-testid={`report-del-${r.id}`}
+          title="Delete this report and all its files"
+          aria-label={`Delete ${r.id}`}
+          disabled={deleting === r.id}
+          onClick={(e) => {
+            e.stopPropagation();
+            setPendingDelete(r);
+          }}
+        >
+          {deleting === r.id ? '…' : '✕'}
+        </button>
+        {company && company !== ticker && !multi && (
+          <span className="reports-item-co">{company}</span>
+        )}
+      </button>
+      <button
+        type="button"
+        className="reports-item-raw"
+        data-testid={`report-raw-${r.id}`}
+        onClick={() => setRaw(r.id)}
+      >
+        {rawLoading && rawId === r.id ? '…' : 'Data'}
+      </button>
+      {tip && (
+        <div className="report-row-tip" role="tooltip" style={{ left: tip.x, top: tip.y }}>
+          {r.tickers && r.tickers.length > 1 && (
+            <span className="report-row-tip-count">{r.tickers.length} symbols</span>
+          )}
+          <span className="report-row-tip-symbols">{symbols}</span>
+        </div>
+      )}
+    </div>
   );
 }

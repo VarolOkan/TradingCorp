@@ -94,6 +94,44 @@ function parseStem(stem: string): { agencyId: string; ticker: string; time: stri
   return { agencyId, ticker, time };
 }
 
+// Durable per-report metadata sidecar. The on-disk filename stem only encodes a
+// single ticker, so multi-symbol runs would otherwise lose their full symbol
+// list on a disk reconcile (server restart). We persist `{ agencyId, tickers,
+// companyName, generatedAt }` to `<stem>.meta.json` at POST time and read it
+// back here. For pre-sidecar reports (written before this change) we fall back
+// to the always-present `.json` raw-data dump (which also carries the full
+// ticker list) and lazily backfill the sidecar so the fix applies to existing
+// reports on first list — no re-run needed. Returns null when neither exists.
+interface ReportMeta { agencyId: string; tickers: string[]; companyName: string; generatedAt: string; }
+export function readReportMeta(dayDir: string, stem: string): ReportMeta | null {
+  const sidecar = path.join(dayDir, `${stem}.meta.json`);
+  if (fs.existsSync(sidecar)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(sidecar, 'utf8'));
+      if (raw && Array.isArray(raw.tickers)) return raw as ReportMeta;
+    } catch { /* fall through to JSON dump */ }
+  }
+  // Fallback: the raw-data dump always has the full ticker list.
+  const jsonPath = path.join(dayDir, `${stem}.json`);
+  if (fs.existsSync(jsonPath)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      if (raw && Array.isArray(raw.tickers) && raw.tickers.length) {
+        const meta: ReportMeta = {
+          agencyId: raw.agencyId,
+          tickers: raw.tickers,
+          companyName: raw.companyName,
+          generatedAt: raw.generatedAt,
+        };
+        // Lazy backfill so future reads are cheap + durable.
+        try { fs.writeFileSync(sidecar, JSON.stringify(meta)); } catch { /* non-fatal */ }
+        return meta;
+      }
+    } catch { /* ignore corrupt dump */ }
+  }
+  return null;
+}
+
 function listOnDisk(): void {
   // Disk is the source of truth: reconcile the in-memory index from disk on
   // EVERY call (do NOT early-return once primed). The index is a process-wide
@@ -115,20 +153,29 @@ function listOnDisk(): void {
       const dayDir = path.join(userDir, day);
       if (!fs.statSync(dayDir).isDirectory()) continue;
       for (const fname of fs.readdirSync(dayDir)) {
+        // Skip the durable metadata sidecar — it ends in `.json` so the report
+        // regex below would mistake it for a real report file and create a
+        // phantom duplicate row (one real row + one `.meta` row per report).
+        if (fname.endsWith('.meta.json')) continue;
         const m = /^report-.+\.(pdf|md|html|json)$/.exec(fname);
         if (!m) continue;
         const ext = m[1] as 'pdf' | 'md' | 'html' | 'json';
         const stem = fname.slice(0, fname.length - (ext.length + 1));
         const id = stem; // stem already starts with `report-`
+        // Durable metadata sidecar (written at POST): carries the FULL ticker
+        // list + companyName so multi-symbol reports survive a disk reconcile
+        // (the filename stem only encodes one ticker). Falls back to parseStem
+        // for legacy reports that have no sidecar.
+        const meta = readReportMeta(dayDir, stem);
         const { agencyId, ticker, time } = parseStem(stem);
         const rec = index.get(`${userId}:${id}`) ?? {
           id,
           userId,
           day,
-          agencyId,
-          tickers: ticker ? [ticker] : [],
-          companyName: ticker ? ticker.toUpperCase() : prettify(agencyId),
-          generatedAt: day + (time ? 'T' + time.replace(/-/g, ':') : ''),
+          agencyId: meta?.agencyId ?? agencyId,
+          tickers: meta?.tickers ?? (ticker ? [ticker] : []),
+          companyName: meta?.companyName ?? (ticker ? ticker.toUpperCase() : prettify(agencyId)),
+          generatedAt: meta?.generatedAt ?? (day + (time ? 'T' + time.replace(/-/g, ':') : '')),
           files: { pdf: null, md: null, html: null, json: null },
         };
         rec.files[ext] = {
@@ -213,6 +260,16 @@ export function registerReportRoutes(app: express.Express): void {
       fs.writeFileSync(jsonPath, JSON.stringify(dump, null, 2));
       rec.files.json = { format: 'json', dir: `/reports/${userId}/${m.day}/${base}.json`, file: jsonPath, available: true };
 
+      // Durable metadata sidecar so multi-symbol reports keep their full ticker
+      // list across a disk reconcile (the filename stem encodes only one ticker).
+      const metaPath = path.join(reportsRoot(), userId, m.day, `${base}.meta.json`);
+      fs.writeFileSync(metaPath, JSON.stringify({
+        agencyId: m.agencyId,
+        tickers: m.tickers,
+        companyName: m.companyName,
+        generatedAt: m.generatedAt,
+      }));
+
       // PDF (best-effort via pdfkit).
       const pdfBuf = await renderPdfBuffer(m);
       if (pdfBuf) {
@@ -277,7 +334,7 @@ export function registerReportRoutes(app: express.Express): void {
         for (const day of fs.readdirSync(userDir)) {
           const dayDir = path.join(userDir, day);
           if (!fs.statSync(dayDir).isDirectory()) continue;
-          for (const ext of ['md', 'html', 'pdf', 'json']) {
+          for (const ext of ['md', 'html', 'pdf', 'json', 'meta.json']) {
             const f = path.join(dayDir, `${id}.${ext}`);
             if (fs.existsSync(f)) {
               try {

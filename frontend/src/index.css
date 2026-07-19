@@ -3717,8 +3717,8 @@ body {
 }
 .reports-item:hover { background: #1e293b; border-color: #334155; }
 .reports-item-agency { color: #93c5fd; font-weight: 700; }
-.reports-item-ticker { color: #fbbf24; font-weight: 700; }
-.reports-item-time { color: #94a3b8; margin-left: auto; font-variant-numeric: tabular-nums; }
+.reports-item-ticker { color: #fbbf24; font-weight: 700; margin-left: auto; }
+.reports-item-time { color: #94a3b8; font-variant-numeric: tabular-nums; }
 .reports-item-co { color: #cbd5e1; font-size: 0.75rem; }
 /* Phase R5: per-run raw-data wrapper (report row + "Raw data" button). */
 .reports-item-wrap { position: relative; display: flex; align-items: stretch; gap: 0.4rem; margin-bottom: 0.35rem; }
@@ -3738,6 +3738,59 @@ body {
   transition: background 160ms ease, color 160ms ease;
 }
 .reports-item-raw:hover { background: rgba(56, 189, 248, 0.16); color: #e0f2fe; }
+/* Hover tooltip on a report row — reveals the run's full ticker list after a
+   500ms delay. Sits ABOVE the row as a speech bubble (with a downward tail),
+   position:fixed + high z-index so the popover's scroll area never clips it,
+   pointer-events:none so it can't steal the hover. Long symbol lists wrap onto
+   multiple lines instead of being clipped to one row. */
+.report-row-tip {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: none;
+  max-width: 260px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: #0f1d3d;
+  border: 1px solid #2c4a7c;
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  text-align: center;
+  white-space: pre-line;
+  word-break: break-word;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  /* Sit above + centered on the row: shift up by its own height (+ gap) and
+     back by half its width, so multi-line bubbles clear the button without
+     measuring and the tail points at the row's center. */
+  transform: translate(-50%, calc(-100% - 9px));
+}
+/* Speech-bubble tail pointing down toward the row. */
+.report-row-tip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid #0f1d3d;
+  filter: drop-shadow(0 1px 0 #2c4a7c);
+}
+/* Count line: bold blue — matches the [Data] button text (#7dd3fc). */
+.report-row-tip-count {
+  display: block;
+  color: #7dd3fc;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+/* Symbol list: bold orange — matches the row's ticker text (#fbbf24). */
+.report-row-tip-symbols {
+  display: block;
+  color: #fbbf24;
+  font-weight: 800;
+}
 /* Inside .reports-item (which is inside .topbar-actions), so scope under
    .reports-item to beat `.topbar-actions button` (0,1,1). */
 .reports-item .reports-item-del-inline {
