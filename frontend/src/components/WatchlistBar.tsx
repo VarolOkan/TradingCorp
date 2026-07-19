@@ -5,6 +5,7 @@
 // analysis tool -> MarketDataCard), or remove it from the watchlist.
 import { useState } from 'react';
 import { useWatchlist } from '../lib/watchlist';
+import { validateSymbolsClient } from '../api/symbolClient';
 
 export interface WatchlistBarProps {
   /** Deep-dive a symbol: run it through the analysis tool (MarketDataCard). */
@@ -17,8 +18,9 @@ export function WatchlistBar({ onOpen, onAnalyze }: WatchlistBarProps) {
   const { symbols, add, remove } = useWatchlist();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const sym = draft.trim().toUpperCase();
     if (!sym) {
@@ -29,9 +31,24 @@ export function WatchlistBar({ onOpen, onAnalyze }: WatchlistBarProps) {
       setError('Invalid ticker format');
       return;
     }
+    setChecking(true);
+    setError(null);
+    try {
+      // Server-side validation: rejects non-symbols (e.g. the English word
+      // "IRON") before persisting them to the watchlist. Fail-open: if the
+      // server/network errors we accept the ticker rather than blocking.
+      const { invalid } = await validateSymbolsClient([sym]);
+      if (invalid.includes(sym)) {
+        setError(`"${sym}" is not a recognized ticker symbol`);
+        return;
+      }
+    } catch {
+      // network/validation error → accept (fail-open)
+    } finally {
+      setChecking(false);
+    }
     add(sym);
     setDraft('');
-    setError(null);
   };
 
   return (
@@ -53,8 +70,8 @@ export function WatchlistBar({ onOpen, onAnalyze }: WatchlistBarProps) {
           aria-label="Add ticker to watchlist"
           data-testid="watchlist-input"
         />
-        <button type="submit" className="watchlist-add-btn" data-testid="watchlist-add-btn">
-          + Add
+        <button type="submit" className="watchlist-add-btn" data-testid="watchlist-add-btn" disabled={checking}>
+          {checking ? '…' : '+ Add'}
         </button>
       </form>
       {error && (

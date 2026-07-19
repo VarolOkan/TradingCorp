@@ -7,6 +7,7 @@ import type { AgentState } from '../../types/financial-analysis';
 import { instructionFor } from '../prompts';
 import { makeNodeSurface, type NodeSurface } from './shared';
 import { parseQuery } from '../../utils/parse-query';
+import { validateTickers } from '../../utils/symbol-lookup';
 import type { AnalystTuning } from '../../types/registry';
 
 export type { NodeSurface };
@@ -15,6 +16,8 @@ export async function orchestratorHandler(
   state: AgentState,
   node: NodeSurface,
   _tuning?: AnalystTuning,
+  fetchFn?: typeof fetch,
+  universeCheck?: (ticker: string) => Promise<'in' | 'out' | 'unknown'>,
 ): Promise<AgentState> {
   let updatedState = node.updateStep(state, 'orchestrator_processing');
 
@@ -45,6 +48,21 @@ export async function orchestratorHandler(
       const parsed = parseQuery(query);
       tickers = parsed.tickers;
       options = parsed.options;
+      // Validate query-derived tickers against a real symbol API so English
+      // words that look like tickers (IRON, CAT, NOW) are dropped rather than
+      // silently analyzed. Best-effort: a network failure keeps every ticker
+      // (fail-open) so analysis is never blocked (KNOWN_ISSUES #1/#6).
+      if (tickers.length > 0 && fetchFn) {
+        const { valid, invalid } = await validateTickers(tickers, fetchFn);
+        if (invalid.length > 0) {
+          tickers = valid;
+          updatedState = node.addMessage(
+            updatedState,
+            'system',
+            `Dropped ${invalid.length} non-symbol token(s): ${invalid.join(', ')} (not found on symbol API)`,
+          );
+        }
+      }
       updatedState = node.addMessage(
         updatedState,
         'system',

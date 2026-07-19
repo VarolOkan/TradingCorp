@@ -1,5 +1,6 @@
 // frontend/src/components/AnalysisForm.tsx
 import { useState, FormEvent, KeyboardEvent } from 'react';
+import { validateSymbolsClient } from '../api/symbolClient';
 
 export const MAX_SYMBOLS = 6;
 
@@ -30,28 +31,55 @@ export function AnalysisForm({
   onBlur,
 }: AnalysisFormProps) {
   const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const atMax = symbols.length >= MAX_SYMBOLS;
 
-  const addSymbol = (raw: string) => {
+  // Validate a typed/pasted symbol against the tokenless symbol API before
+  // turning it into a pill. Fail-open: a network error or timeout accepts the
+  // symbol rather than blocking input. Existing pills (e.g. from the screener
+  // "→ Add") bypass this because they are already real tickers.
+  const addSymbol = async (raw: string) => {
     const sym = normalize(raw);
-    if (!sym) return;
+    if (!sym) {
+      setError(null); // nothing to add → clear any stale error
+      return;
+    }
     if (symbols.length >= MAX_SYMBOLS) return; // hard cap
     if (symbols.includes(sym)) {
       setDraft('');
+      setError(null);
       return;
     }
+    setChecking(true);
+    try {
+      // Server-side validation rejects non-symbols (e.g. the word "IRON")
+      // before turning them into pills. Fail-open: a network/server error
+      // accepts the symbol rather than blocking input.
+      const { invalid } = await validateSymbolsClient([sym]);
+      if (invalid.includes(sym)) {
+        setError(`"${sym}" is not a recognized ticker symbol`);
+        return;
+      }
+    } catch {
+      // validation/network error → accept (fail-open)
+    } finally {
+      setChecking(false);
+    }
+    setError(null);
     onSymbolsChange([...symbols, sym]);
     setDraft('');
   };
 
   const removeSymbol = (sym: string) => {
+    setError(null); // clear any stale validation error when the list changes
     onSymbolsChange(symbols.filter((s) => s !== sym));
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' || e.key === ',' || e.key === ' ') {
       e.preventDefault();
-      // Support pasting "AAPL,MSFT" — split and add each.
+      // Support pasting "AAPL,MSFT" — split and validate+add each.
       draft
         .split(',')
         .map(normalize)
@@ -65,6 +93,7 @@ export function AnalysisForm({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
+    setError(null); // clear any prior validation error as the user edits
     // If the user types a comma inline, commit immediately.
     if (v.includes(',')) {
       v.split(',').map(normalize).filter(Boolean).forEach(addSymbol);
@@ -137,6 +166,12 @@ export function AnalysisForm({
       <button type="submit" className="analyze-btn" disabled={running || symbols.length === 0}>
         {running ? 'Analyzing…' : 'Analyze'}
       </button>
+
+      {error && (
+        <p className="form-error" role="alert" data-testid="ticker-form-error">
+          {error}
+        </p>
+      )}
     </form>
   );
 }

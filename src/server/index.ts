@@ -25,6 +25,7 @@ import { registerAnalystFlavorsRoutes } from './analyst-flavors-routes';
 import { llmConfigStore, resolveModelRole, vaultHealth } from './llm-config';
 import { registerLlmConfigRoutes } from './llm-config-routes';
 import { registerQuoteRoutes } from './quote-routes';
+import { registerSymbolRoutes } from './symbol-routes';
 import { makeYahooFundFetch } from './quote';
 import { registerHistoryRoutes } from './history-routes';
 import { registerOptionsHistoryRoutes } from './options-history-routes';
@@ -275,6 +276,10 @@ class AnalysisServer {
     registerAnalystFlavorsRoutes(this.app, analystFlavorStore);
     registerLlmConfigRoutes(this.app, llmConfigStore);
     registerQuoteRoutes(this.app, undefined, makeYahooFundFetch());
+    // Ticker-symbol validation (server-side, shared with the orchestrator). The
+    // frontend calls this instead of validating in the browser because the symbol
+    // API is not CORS-accessible from the client.
+    registerSymbolRoutes(this.app);
     registerHistoryRoutes(this.app);
     registerOptionsHistoryRoutes(this.app);
     registerOptionsDebugRoutes(this.app);

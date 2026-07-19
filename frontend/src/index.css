@@ -3581,6 +3581,8 @@ body {
 .watchlist-input { flex: 1; padding: 0.35rem 0.6rem; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.25); background: rgba(2, 6, 23, 0.6); color: #e2e8f0; font-size: 0.8rem; }
 .watchlist-add-btn { padding: 0.35rem 0.9rem; border-radius: 8px; border: 1px solid rgba(52, 211, 153, 0.45); background: rgba(16, 185, 129, 0.16); color: #6ee7b7; font-weight: 600; cursor: pointer; }
 .watchlist-error { color: #fca5a5; font-size: 0.74rem; margin: 0.3rem 0 0; }
+.form-error { color: #fca5a5; font-size: 0.74rem; margin: 0.3rem 0 0; flex-basis: 100%; width: 100%; }
+.form-error-above { display: none; }
 .watchlist-empty { color: #94a3b8; font-size: 0.76rem; margin: 0.5rem 0 0; }
 .watchlist-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0; padding: 0; }
 .watchlist-chip { display: inline-flex; align-items: center; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 999px; overflow: hidden; }

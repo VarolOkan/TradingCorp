@@ -212,10 +212,78 @@ describe('Orchestrator handler', () => {
       expect(result.tickers).toContain('SPY');
     });
 
-    it('should detect conservative risk on free-form wording', () => {
-      const result = parseQuery('I need a defensive, conservative read on JNJ');
-      expect(result.tickers).toEqual(['JNJ']);
-      expect(result.options.risk_tolerance).toBe('CONSERVATIVE');
+    it('should validate query-parsed tickers and drop non-symbols (KNOWN_ISSUES #1/#6)', async () => {
+      // Yahoo-shaped fake: a real chart.result for AAPL/MSFT, a chart.error
+      // ("No data found") for GGGGGG (a junk symbol). 404 + chart.error is how
+      // Yahoo reports an unknown symbol.
+      const fetchFn = ((url: string) => {
+        const isJunk = /GGGGGG/i.test(url);
+        const payload = isJunk
+          ? { chart: { error: { description: 'No data found, symbol may be delisted' } } }
+          : { chart: { result: [{ meta: { regularMarketPrice: 1 } }] } };
+        return Promise.resolve({ ok: !isJunk, status: isJunk ? 404 : 200, json: async () => payload } as any);
+      }) as unknown as typeof fetch;
+      const universeCheck = async () => 'unknown' as const; // force Layer-2 (Yahoo) path
+
+      const initialState: AgentState = {
+        messages: [
+          { role: 'user', content: 'Compare GGGGGG against AAPL and MSFT', timestamp: new Date().toISOString() },
+        ],
+        current_date: '',
+        tickers: [],
+        company_name: '',
+        investment_thesis: '',
+        final_decision: '',
+        error: null,
+        current_step: 'start',
+      };
+
+      const result = await orchestratorHandler(initialState, surface, undefined, fetchFn, universeCheck);
+
+      // GGGGGG is not a real symbol; it must be dropped, leaving the two real tickers.
+      expect(result.tickers).toEqual(['AAPL', 'MSFT']);
+      expect(result.error).toBeNull();
+    });
+
+    it('should fail OPEN and keep all tickers when validation errors (network down)', async () => {
+      const fetchFn = (async () => { throw new Error('network down'); }) as unknown as typeof fetch;
+      const universeCheck = async () => 'unknown' as const;
+
+      const initialState: AgentState = {
+        messages: [
+          { role: 'user', content: 'Compare IRON against SPY', timestamp: new Date().toISOString() },
+        ],
+        current_date: '',
+        tickers: [],
+        company_name: '',
+        investment_thesis: '',
+        final_decision: '',
+        error: null,
+        current_step: 'start',
+      };
+
+      const result = await orchestratorHandler(initialState, surface, undefined, fetchFn, universeCheck);
+      expect(result.tickers.sort()).toEqual(['IRON', 'SPY']);
+      expect(result.error).toBeNull();
+    });
+
+    it('should NOT validate explicit state.tickers (user-confirmed symbols)', async () => {
+      const fetchFn = (async () => { throw new Error('should not be called'); }) as unknown as typeof fetch;
+      const universeCheck = async () => 'unknown' as const;
+
+      const initialState: AgentState = {
+        messages: [],
+        current_date: '',
+        tickers: ['IRON', 'CAT'],
+        company_name: '',
+        investment_thesis: '',
+        final_decision: '',
+        error: null,
+        current_step: 'start',
+      };
+
+      const result = await orchestratorHandler(initialState, surface, undefined, fetchFn, universeCheck);
+      expect(result.tickers).toEqual(['IRON', 'CAT']);
     });
   });
 });

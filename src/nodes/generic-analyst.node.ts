@@ -17,6 +17,7 @@
 import { AgentState } from '../types/financial-analysis';
 import type { AnalystDef, AnalysisHorizon, AnalystTuning } from '../types/registry';
 import { getLogicHandler } from '../registry/logic';
+import { orchestratorHandler } from '../registry/logic/orchestrator';
 import { makeNodeSurface, type NodeSurface } from '../registry/logic/shared';
 import { acquireForAnalyst, aggregateDataHealth, isLiveSource, type AcquireContext, type AnalystAcquisition } from '../registry/sources';
 import { declarativeHandler } from '../registry/logic/declarative';
@@ -108,6 +109,10 @@ export class GenericAnalystNode {
     let updated: AgentState;
     if (this.def.logic.mode === 'declarative') {
       updated = await declarativeHandler(state, surface, this.def, tuning);
+    } else if (this.def.logic.fn === 'orchestrate') {
+      // The orchestrator validates query-parsed tickers against a real symbol
+      // API; thread the node's fetch so it works in prod and is injectable in tests.
+      updated = await orchestratorHandler(state, surface, tuning, ctx.fetchFn);
     } else {
       const handler = getLogicHandler(this.def.logic.fn ?? this.def.id);
       updated = await handler(state, tuning, surface, acquisition ?? undefined);
