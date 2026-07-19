@@ -28,6 +28,7 @@ import { registerQuoteRoutes } from './quote-routes';
 import { makeYahooFundFetch } from './quote';
 import { registerHistoryRoutes } from './history-routes';
 import { registerOptionsHistoryRoutes } from './options-history-routes';
+import { appendDecision, type DecisionRecord } from './decision-log';
 import { registerOptionsDebugRoutes } from './options-debug-routes';
 import { registerServerLogRoutes } from './server-log-routes';
 import { registerReportRoutes } from './report-routes';
@@ -41,6 +42,46 @@ import { shouldShowMockDisabledBanner } from '../registry/logic/mockMode';
 /**
  * Socket.IO server for real-time financial analysis updates
  */
+
+// ---- Phase 2 decision-log capture helpers (pure; used by captureDecision) ----
+
+/** Current ingested price per ticker, taken from the last close of the first
+ *  interval series in state.ingested.bars. Absent on the seeded parity path. */
+function extractCurrentPrices(state: AgentState): Record<string, number> {
+  const out: Record<string, number> = {};
+  const bars = (state as any).ingested?.bars;
+  if (!bars || typeof bars !== 'object') return out;
+  for (const [ticker, series] of Object.entries(bars as Record<string, any[]>)) {
+    if (!Array.isArray(series) || series.length === 0) continue;
+    const last = series[series.length - 1];
+    const close = last?.close ?? last?.c;
+    if (typeof close === 'number') out[ticker] = close;
+  }
+  return out;
+}
+
+/** Per-analyst verdicts at decision time from the analyst traces. */
+function extractVerdicts(state: AgentState): { fundamental?: string; technical?: string; sentiment?: string } {
+  const out: { fundamental?: string; technical?: string; sentiment?: string } = {};
+  for (const t of (state.analystTraces as any[]) ?? []) {
+    if (t?.analyst === 'fundamental' || t?.analyst === 'technical' || t?.analyst === 'sentiment') {
+      (out as any)[t.analyst] = t?.output?.verdict;
+    }
+  }
+  return out;
+}
+
+/** Net Bull/Bear debate lean from the governance trace, if the debate ran. */
+function extractDebateLean(state: AgentState): 'BULLISH' | 'BEARISH' | 'BALANCED' | null {
+  for (const t of (state.analystTraces as any[]) ?? []) {
+    if (t?.analyst === 'governance') {
+      const lean = t?.output?.details?.debate?.netLean;
+      if (lean === 'BULLISH' || lean === 'BEARISH' || lean === 'BALANCED') return lean;
+    }
+  }
+  return null;
+}
+
 class AnalysisServer {
   private app: express.Express;
   private server: http.Server;
@@ -376,6 +417,27 @@ class AnalysisServer {
         mockDisabled: shouldShowMockDisabledBanner(normalized.dataHealth),
         timestamp: new Date().toISOString()
       });
+
+      // Phase 2: persist a decision record (best-effort — a log write failure
+      // must NEVER break the run). Gated by DECISION_LOG_ENABLED (default ON).
+      if (process.env.DECISION_LOG_ENABLED !== 'false') {
+        try {
+          const prices = extractCurrentPrices(result);
+          const record: DecisionRecord = {
+            ts: new Date().toISOString(),
+            tickers,
+            agencyId: requestedAgencyId,
+            decision: normalized.decision === 'APPROVE' || normalized.decision === 'REJECT' ? normalized.decision : 'ERROR',
+            confidence: typeof normalized.confidence === 'number' ? normalized.confidence : null,
+            debateLean: extractDebateLean(result) ?? undefined,
+            verdicts: extractVerdicts(result),
+            prices: Object.keys(prices).length ? prices : undefined,
+          };
+          appendDecision(record);
+        } catch (logErr) {
+          logger.warn(`Decision log write failed (non-fatal): ${logErr instanceof Error ? logErr.message : String(logErr)}`);
+        }
+      }
 
       // Self-documenting diagnostic (debug-level: off unless LOG_LEVEL=DEBUG).
       // Proves at a glance whether the banner is correct or whether the running

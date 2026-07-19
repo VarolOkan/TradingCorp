@@ -4,8 +4,10 @@
 
 import type { AgentState, InvestmentDecision, RiskAssessment } from '../../types/financial-analysis';
 import { instructionFor } from '../prompts';
+import { logger } from '../../utils/logger';
 import { stringToSeed, seededRandom, updateInvestmentThesis, annotateDataReceived, recordDataReceived, type NodeSurface } from './shared';
 import type { AnalystTuning } from '../../types/registry';
+import { getLastForTicker, getRecentLessons, computeRealizedReturn, computeAlphaVsSpy, type DecisionRecord } from '../../server/decision-log';
 
 export type { NodeSurface };
 
@@ -55,7 +57,7 @@ export async function governanceHandler(
   tuning?: AnalystTuning,
 ): Promise<AgentState> {
   let updatedState = node.updateStep(state, 'governance_gatekeeper_start');
-  node.emitProgress(updatedState, 'analyst:start', 'governance', { stage: 3 });
+  node.emitProgress(updatedState, 'analyst:start', 'governance', { stage: 4 });
 
   updatedState = node.addMessage(updatedState, 'system',
     `Starting governance review for ${state.tickers.length} ticker(s): ${state.tickers.join(', ')}`);
@@ -71,6 +73,33 @@ export async function governanceHandler(
     // Read the risk analyst's output from state (it ran earlier in the chain)
     // so the governance veto can act on the REAL stop-loss / risk level.
     const riskByTicker = extractRiskAssessments(state);
+
+    // Phase 2 (decision-log reflection): load prior-run records for these
+    // tickers and recent cross-ticker lessons, then build honest reflection
+    // notes. Gated by DECISION_LOG_ENABLED (default ON). Non-fatal: any error
+    // here must never break governance. Absent prior record => no note => the
+    // single-run output is byte-identical to Phase 1 (parity preserved).
+    const decisionReflections: string[] = [];
+    if (process.env.DECISION_LOG_ENABLED !== 'false') {
+      try {
+        for (const ticker of state.tickers) {
+          const prior = getLastForTicker(ticker, 1)[0];
+          if (prior) {
+            const note = buildDecisionReflection(ticker, prior, extractIngestedPrice(state, ticker));
+            if (note) decisionReflections.push(note);
+          }
+        }
+        // Recent cross-ticker lessons (exclude the primary ticker) widen the
+        // gatekeeper's memory beyond the immediate symbol.
+        const lessons = getRecentLessons(5, state.tickers[0]);
+        for (const l of lessons) {
+          if (l.reflection) decisionReflections.push(`Recent lesson (${l.tickers.join('/')}): ${l.reflection}`);
+        }
+      } catch (reflErr) {
+        // Non-fatal: log via the node surface if available, otherwise ignore.
+        logger.warn(`Decision-log reflection failed (non-fatal): ${reflErr instanceof Error ? reflErr.message : String(reflErr)}`);
+      }
+    }
 
     for (const ticker of state.tickers) {
       const { decision, riskAssessment } = performGovernanceReview(ticker, tuning, riskByTicker[ticker], state);
@@ -128,8 +157,16 @@ export async function governanceHandler(
             summary: generateDecisionSummary(overallDecision, decisions, riskAssessments),
             ...(reflectionNote ? { reflection: reflectionNote } : {}),
             ...(debateNotes.length ? { debate: debateNotes } : {}),
+            ...(decisionReflections.length ? { decisionLog: decisionReflections } : {}),
           },
         },
+        ...(decisionReflections.length
+          ? [{
+              role: 'system' as const,
+              content: `Decision-log reflection (prior runs):\n${decisionReflections.join('\n')}`,
+              timestamp: new Date().toISOString(),
+            }]
+          : []),
       ],
       investment_thesis: updateInvestmentThesis(state.investment_thesis, `Final decision: ${overallDecision.decision} with ${overallDecision.confidence}% confidence. ${overallDecision.reasoning}`, 'GOVERNANCE'),
       final_decision: overallDecision.decision,
@@ -139,7 +176,7 @@ export async function governanceHandler(
     updatedState = node.captureTrace(updatedState, {
       analyst: 'governance',
       name: 'Governance Gatekeeper',
-      stage: 3,
+      stage: 4,
       instructions: instructionFor('governance'),
       inputs: state.tickers.map((ticker) => ({
         ticker,
@@ -166,11 +203,11 @@ export async function governanceHandler(
         summary: generateDecisionSummary(overallDecision, decisions, riskAssessments),
         details: { overall: overallDecision, perTicker: decisions, debate: debateNotes.length ? { bull: debate.bull, bear: debate.bear, netLean } : undefined },
       },
-      notes: [overallDecision.preservation_rationale, ...(reflectionNote ? [reflectionNote] : []), ...debateNotes].filter(Boolean) as string[],
+      notes: [overallDecision.preservation_rationale, ...(reflectionNote ? [reflectionNote] : []), ...debateNotes, ...decisionReflections].filter(Boolean) as string[],
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'governance', {
-      stage: 3,
+      stage: 4,
       tickers: state.tickers,
       decision: overallDecision.decision,
       confidence: overallDecision.confidence,
@@ -334,6 +371,53 @@ function netDebateLean(bull?: { score: number }, bear?: { score: number }): 'BUL
   if (delta >= 15) return 'BULLISH';
   if (delta <= -15) return 'BEARISH';
   return 'BALANCED';
+}
+
+/**
+ * Phase 2 (decision-log reflection): build a one-paragraph reflection from a
+ * prior run's decision record and the current run's ingested price for the
+ * same ticker. Returns null when there is no prior record (parity path — the
+ * rest of governance is unchanged). Honest about `asOf`: the realised return
+ * is computed from the prior entry price vs THIS run's ingested price, and is
+ * labelled as such. Pure / deterministic.
+ */
+function buildDecisionReflection(ticker: string, prior: DecisionRecord, currentPrice?: number): string | null {
+  if (!prior) return null;
+  const date = (prior.ts || '').slice(0, 10) || 'prior';
+  const parts: string[] = [
+    `Prior ${ticker} call (${date}): ${prior.decision} @ ${prior.confidence ?? '?'}% confidence.`,
+  ];
+  const entry = prior.prices?.[ticker] ?? (prior as any).priceAtDecision;
+  if (typeof entry === 'number' && typeof currentPrice === 'number' && entry !== 0) {
+    const ret = computeRealizedReturn(entry, currentPrice);
+    if (ret != null) {
+      const dir = ret >= 0 ? 'up' : 'down';
+      parts.push(`${ticker} is ${dir} ${Math.abs(ret).toFixed(1)}% vs the ${entry.toFixed(2)} entry (asOf this run's ingested price).`);
+      if (typeof prior.spyPrice === 'number' && typeof (prior as any).spyCurrentPrice === 'number') {
+        const spyRet = computeRealizedReturn(prior.spyPrice, (prior as any).spyCurrentPrice);
+        const alpha = computeAlphaVsSpy(ret, spyRet);
+        if (alpha != null) parts.push(`Alpha vs SPY: ${alpha >= 0 ? '+' : ''}${alpha.toFixed(1)}%.`);
+      }
+      // Honest conviction adjustment: a prior APPROVE that lost money is a miss.
+      if (prior.decision === 'APPROVE' && ret <= -5) {
+        parts.push('That prior approval subsequently lost money — revisit the thesis and tighten conditions before re-approving.');
+      } else if (prior.decision === 'REJECT' && ret >= 5) {
+        parts.push('That prior rejection subsequently rose — reconsider whether the veto was too strict.');
+      }
+    }
+  } else {
+    parts.push('(No ingested price on the prior run to compute a realised return.)');
+  }
+  return parts.join(' ');
+}
+
+/** Current ingested price for a ticker from state.ingested.bars (last close). */
+function extractIngestedPrice(state: AgentState | undefined, ticker: string): number | undefined {
+  const series = (state as any)?.ingested?.bars?.[ticker];
+  if (!Array.isArray(series) || series.length === 0) return undefined;
+  const last = series[series.length - 1];
+  const close = last?.close ?? last?.c;
+  return typeof close === 'number' ? close : undefined;
 }
 
 /** Pull the risk analyst's per-ticker assessment off the pipeline state so

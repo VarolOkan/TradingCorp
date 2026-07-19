@@ -11,6 +11,14 @@ import { buildLegacyGraph } from '../orchestration/financial-graph';
 import { AGENCIES } from '../registry/agencies';
 import { AgentState } from '../types/financial-analysis';
 
+// Hermetic: parity locks the PURE agency graph (node order, traces,
+// determinism). It must not read a real decision-log file left by other suites
+// (e.g. the streaming integration test writes one via the server capture), or
+// the Phase 2 governance reflection would change the governance trace. The
+// decision-log reflection is covered by decision-log-reflection.test.ts.
+beforeAll(() => { process.env.DECISION_LOG_ENABLED = 'false'; });
+afterAll(() => { delete process.env.DECISION_LOG_ENABLED; });
+
 function makeInitialState(tickers: string[]): AgentState {
   return {
     messages: [],

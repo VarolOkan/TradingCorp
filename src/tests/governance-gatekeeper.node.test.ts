@@ -7,6 +7,12 @@ import { AgentState } from '../types/financial-analysis';
 
 const surface = makeNodeSurface();
 
+// Hermetic: pure-governance tests must not read a real decision-log file from
+// disk (which would inject Phase 2 reflections and change the message count).
+// The decision-log reflection is covered by decision-log-reflection.test.ts.
+beforeAll(() => { process.env.DECISION_LOG_ENABLED = 'false'; });
+afterAll(() => { delete process.env.DECISION_LOG_ENABLED; });
+
 describe('Governance handler', () => {
   const run = (over: Partial<AgentState> = {}): Promise<AgentState> =>
     governanceHandler(
