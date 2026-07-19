@@ -27,7 +27,6 @@ over Socket.IO, and renders the result in a React single-page app.
 - [Settings dialog & runtime config (Option B)](#settings-dialog--runtime-config-option-b)
 - [Analyst Wall & drill-down traceability](#analyst-wall--drill-down-traceability)
 - [Auto-connect with retry](#auto-connect-with-retry)
-- [Frontend rewrite — phased plan](#frontend-rewrite--phased-plan)
 - [Testing](#testing)
 - [Known issues](#known-issues)
 - [Documentation index](#documentation-index)
@@ -124,7 +123,7 @@ Mom / Verdict), with a → Analyze hand-off into the analysis tool.*
 | Frontend     | React 18 + TypeScript, built with **Vite 5**                  |
 | Styling      | Tailwind CSS 3 (PostCSS)                                      |
 | Real-time    | Socket.IO (client + server v4)                                |
-| Visualization (future) | **D3.js 7** (relations graph, added as a dependency now) |
+| Visualization | **D3.js 7** — candlestick/volume `PriceChart` + relations graph (in active use) |
 | Backend      | Node.js + Express 4, TypeScript via `tsx`                     |
 | Orchestration| LangGraph (`@langchain/langgraph`) `StateGraph`               |
 | Tests        | Jest (backend) + Vitest + Testing Library (frontend)          |
@@ -135,33 +134,68 @@ Mom / Verdict), with a → Analyze hand-off into the analysis tool.*
 
 ```
 TradingCorp/
-├── frontend/                 # React + Vite SPA (new)
+├── frontend/                         # React 18 + Vite 5 SPA (TypeScript)
 │   ├── index.html
 │   ├── src/
 │   │   ├── main.tsx
 │   │   ├── App.tsx
-│   │   ├── index.css         # Tailwind entry
-│   │   ├── types.ts          # shared types (AnalysisResult, ConnectionSettings, AnalystTrace, …)
-│   │   ├── components/       # SettingsDialog, AnalysisForm, ResultsPanel, RelationsGraphView, AnalysisView
-│   │   │   └── analysts/     # AnalystWall (real-time per-analyst panels) + AnalystTraceDrawer (drill-down)
-│   │   ├── hooks/            # useAnalysis (Phase 3 socket hook) + useAnalystRun (per-analyst streaming)
-│   │   ├── api/              # (Phase 2) /config client
-│   │   └── test/             # Vitest setup + specs
-│   └── dist/                 # production build output (gitignored)
-├── src/                      # Backend (TypeScript)
-│   ├── server/index.ts       # Express + Socket.IO entry; serves frontend/dist
-│   ├── orchestration/        # AgencyGraph builder + buildLegacyGraph shim
-│   ├── registry/             # analysts.ts (AnalystDefs) + agencies.ts (AgencyDefs) + logic/*.ts handlers + logic.ts registry
-│   ├── nodes/                # generic-analyst.node.ts (the single data-driven node; no per-analyst subclasses)
-│   ├── prompts/              # analyst-instructions.ts (TradingAgents-style role prompts for the trace drawer)
-│   ├── types/                # financial-analysis.ts (AgentState, InvestmentDecision, AnalystTrace, …)
-│   ├── config.ts             # server config (PORT, bindHost, data sources)
-│   └── utils/                # logger, retry-handler, parse-query, rng/seed helpers
-├── docs/                     # ARCHITECTURE, SETUP, KNOWN_ISSUES, README
-├── vite.config.ts            # Vite + Vitest config (root: frontend/, proxies to :3001)
-├── tsconfig.frontend.json    # bundler-resolution tsconfig for the SPA
-├── tailwind.config.js        # content scans frontend/src
-├── postcss.config.js
+│   │   ├── index.css                 # Tailwind directives + all app CSS
+│   │   ├── types.ts                  # shared types (AnalysisResult, ConnectionSettings, AnalystTrace, …)
+│   │   ├── components/               # top-level views & panels
+│   │   │   ├── AnalysisForm.tsx  AnalysisView.tsx  ResultsPanel.tsx
+│   │   │   ├── SettingsDialog.tsx  AnalystSettingsDialog.tsx
+│   │   │   ├── ReportsCalendar.tsx  ReportModal.tsx  RawDataDrawer.tsx   # saved-report browser + tooltips
+│   │   │   ├── ScreenerPanel.tsx  WatchlistBar.tsx  MarketDataCard.tsx  PriceChart.tsx
+│   │   │   ├── RelationsGraphView.tsx
+│   │   │   ├── analysts/             # AnalystWall + AnalystTraceDrawer + Agency/Sources dialogs
+│   │   │   │   ├── AnalystWall.tsx  AnalystTraceDrawer.tsx
+│   │   │   │   ├── AgencySelect.tsx  AgencySettingsDialog.tsx  AgencyReorgDialog.tsx
+│   │   │   │   ├── SourcesTab.tsx  DomainSourcesTab.tsx           # swappable-source config UI
+│   │   │   │   └── analysts.ts  agencies.ts  analystConfigSchema.ts   # frontend mirror of the registry
+│   │   │   └── compare/              # multi-ticker compare (perf chart, correlation matrix)
+│   │   ├── api/                      # one typed client per backend route group
+│   │   │   ├── configClient.ts  llmConfigClient.ts  registryClient.ts
+│   │   │   ├── reportClient.ts  historyClient.ts  screenerClient.ts  newsClient.ts
+│   │   │   ├── quoteClient.ts  optionsHistoryClient.ts  serverLogClient.ts
+│   │   │   ├── analystConfigClient.ts  analystParamsClient.ts  analystFlavorsClient.ts
+│   │   │   └── domainSourceClient.ts
+│   │   ├── hooks/                    # useAnalysis (socket run) + useAnalystRun (per-analyst streaming)
+│   │   ├── lib/                      # watchlist.ts (localStorage helpers)
+│   │   ├── visualizations/           # RelationsGraph + Visualization registry
+│   │   └── test/                     # Vitest setup + specs
+│   └── dist/                         # production build output (gitignored)
+├── src/                              # Backend (TypeScript, Express + Socket.IO)
+│   ├── server/
+│   │   ├── index.ts                  # entry; wires all routes, serves frontend/dist
+│   │   ├── socket.ts                 # Socket.IO analysis streaming
+│   │   ├── *-routes.ts               # REST routes: config, llm-config, registry, report, history,
+│   │   │                             #   screener, news, quote, options-history, domain-source,
+│   │   │                             #   analyst-config/params/flavors, server-log, api-docs
+│   │   ├── report.ts / report-routes.ts   # report generation (md/html/pdf/json) + durable .meta.json sidecars
+│   │   ├── decision-log.ts           # persistent JSONL decision log (gated, parity-safe)
+│   │   ├── registry-store.ts         # SQLite-persisted registry overrides (applyAllOverridesToRegistry)
+│   │   ├── llm-sqlite.ts / llm-json-store.ts / llm-vault.ts   # LLM config + credential storage
+│   │   └── connection-config.ts  domain-source-config.ts  quote.ts  thesis-summary.ts  dataDir.ts
+│   ├── orchestration/                # agency-graph.ts (AgencyGraph builder) + financial-graph.ts
+│   ├── registry/                     # data-driven analyst/agency registry
+│   │   ├── analysts.ts  agencies.ts  logic.ts  prompts.ts  validate.ts  analyst-config-schema.ts
+│   │   ├── logic/                    # per-analyst handlers: fundamental, technical, sentiment, news,
+│   │   │                             #   risk, governance, options-handlers, screener, greeks, vol-surface,
+│   │   │                             #   hist, fuse (fusion), data-ingestion, orchestrator, declarative, …
+│   │   ├── sources/                  # multi-source data acquisition (acquire.ts + index.ts)
+│   │   └── types/                    # domain source typing
+│   ├── nodes/                        # generic-analyst.node.ts (single data-driven node; no subclasses)
+│   ├── prompts/                      # analyst-instructions.ts + options-instructions.ts (role prompts)
+│   ├── types/                        # financial-analysis.ts + registry.ts (AgentState, decisions, traces)
+│   ├── config.ts                     # server config (PORT, bindHost, data sources)
+│   ├── utils/                        # logger, retry-handler, parse-query
+│   └── tests/                        # Jest backend specs + fixtures
+├── docs/                             # ARCHITECTURE, SETUP, KNOWN_ISSUES, EXTENDING_ANALYSTS,
+│                                     #   SCREENER_STANDARDS, README, openapi.json
+├── vite.config.ts                    # Vite + Vitest config (root: frontend/, proxies to :3001)
+├── tsconfig.json / tsconfig.frontend.json
+├── jest.config.js                    # backend test config
+├── postcss.config.js                 # Tailwind + autoprefixer (no separate tailwind.config.js)
 ├── package.json
 └── .env.example
 ```
@@ -217,7 +251,7 @@ via environment variables (template: [`.env.example`](.env.example)).
 | `DEFAULT_TIME_HORIZON`     | `MEDIUM_TERM`      | `SHORT_TERM` \| `MEDIUM_TERM` \| `LONG_TERM`                  |
 | `DEFAULT_RISK_TOLERANCE`   | `MODERATE`         | `CONSERVATIVE` \| `MODERATE` \| `AGGRESSIVE`                  |
 | `LOG_LEVEL`                | `info`             | Logging verbosity                                              |
-| `ALPHA_VANTAGE_API_KEY`    | _(empty)_          | Reserved for future data-source integration (not yet consumed)|
+| `ALPHA_VANTAGE_API_KEY`    | _(empty)_          | Alpha Vantage `OVERVIEW` fundamentals (consumed live when set; also configurable via the encrypted vault in Settings) |
 
 **Binding note:** the server binds to `0.0.0.0` (all interfaces) by default via
 `bindHost`. If `HOST` is an unresolvable hostname (e.g. `linux-1sou.AtHome` on a
@@ -402,8 +436,8 @@ any column header to sort. Each row has a **→ Analyze** button that sends the
 ticker straight into the analysis tool.
 
 See [`docs/openapi.json`](docs/openapi.json) (`GET /screener`) for the full
-response schema, and the Phase 18 row in the phased plan above for the
-root-cause fixes (Yahoo 429 retry + circuit-breaker, Nasdaq parser guards).
+response schema. The screener's root-cause fixes (Yahoo 429 retry +
+circuit-breaker, Nasdaq parser guards) are covered in `docs/KNOWN_ISSUES.md §11`.
 
 ---
 
@@ -417,46 +451,6 @@ settles to `Connected` and the button reads `Connect` (disabled). If all three
 attempts fail it shows **`-FAILED-`** and waits for the user to click to retry
 manually. Socket.IO's own internal reconnection is disabled so the countdown is
 deterministic and visible (the retry loop is owned by `App.tsx`).
-
----
-
-## Frontend rewrite — phased plan
-
-The original repo had **two** frontends — a raw vanilla `public/index.html` and a
-partial Next.js app — neither wired to a clean build. It was rewritten to a single
-**React + Vite SPA** delivered in phases, each verified (build + unit tests)
-before the next begins.
-
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **1** | Vite + React + TS scaffold; Tailwind; `tsconfig.frontend.json`; smoke tests. **Build green, tests green.** `package.json` cleaned (removed `next`, vanilla `public/`, `src/pages`), server now serves `frontend/dist`. | ✅ Done |
-| **2** | `SettingsDialog` component + backend `POST /config` (Option B) + unit tests. | ✅ Done |
-| **3** | Core analysis UI: `AnalysisForm`, normalized `ResultsPanel`, streaming `useAnalysis` hook over `analysis_start`/`analysis_complete`/`analysis_error` + unit tests. | ✅ Done |
-| **4** | Clean visualization class structure + **D3** `RelationsGraph` (real nodes/edges render, wired via `RelationsGraphView`) + unit tests. | ✅ Done |
-| **5** | Final wiring/verify + docs sync. (SPA serving done in Phase 1; all phases complete and tested.) | ✅ Done |
-| **6** | **Analyst Wall** (real-time per-analyst panels driven by `analyst_start`/`analyst_done`) + **drill-down trace drawer** (slide-in, 4 pillars: Instructions / Data / Weighting→Output / Sources) with breadcrumb traceability back to source fields. Backend `analystTraces` captured per node (`captureTrace`) and shipped on `analysis_complete`. | ✅ Done |
-| **7** | **Auto-connect with retry** — app connects on load, up to 3 attempts with a live countdown in the Connect button (`Connecting… (3→2→1)`), then `-FAILED-` awaiting manual retry. Socket.IO internal reconnection disabled so the countdown is deterministic. | ✅ Done |
-| **8** | **Per-analyst tabbed settings dialog** — each analyst card shows ONE ⚙ gear opening a tabbed `AnalystSettingsDialog` (`[Sources]` `[Role & Instructions]` `[Weights]`); the former two-gear design + `AnalystSourceDialog` were removed. Role & Instructions edits show **live** in the trace drawer immediately (no re-run). | ✅ Done |
-| **9** | **Live market data (Phase 3)** — after a symbol is entered, tokenless `GET /quote` (Yahoo) surfaces company name + price + day/52-week range + volume, `GET /history` surfaces OHLCV bars, and `GET /options-history` (Polygon, keyed) surfaces option chains. Each degrades to a `note` on source failure. Verified live (AAPL, MSFT). | ✅ Done |
-| **10** | **Unified market card (Phase M)** — replaced the three separate `QuotePanel` / `HistoryPanel` / `OptionsChainPanel` rows with a single **`MarketDataCard`** per ticker (`Chart` / `Quote` / `History` / `Options` tabs). The Chart tab renders a D3 candlestick + volume chart (custom `PriceChart`, TradingView-style crosshair + hover tooltip) with 1D/5M/1M interval toggles. Orphaned panels + their tests deleted. | ✅ Done |
-| **11** | **Real-data technical verdict (2.1)** — the Technical Analyst is now fully data-driven from real Yahoo OHLCV bars: trend / momentum / volatility / support-resistance / score are *derived* from price history (SMA stack, higher-highs/lows, RSI+MACD, return volatility, swing S/R, max drawdown). The seeded RNG is now a **no-bars fallback only**, not mixed into live runs. Ingestion now honors the horizon profile (real 5m/1m bars for intraday/medium, not a hardcoded 1y/1d). Trace `notes` honestly report "derived from real Yahoo OHLCV bars" vs "seeded fallback". 8 new unit tests (`src/tests/technical-realbars.test.ts`). | ✅ Done |
-| **12** | **Analysis-grade chart (item 3)** — `PriceChart` is no longer decorative: it computes **client-side** SMA 20/50/200, EMA 12/26, Bollinger Bands (20,2), VWAP, and RSI(14) overlays from the bars it already has, each toggleable. RSI renders as its own 0–100 sub-pane (30/50/70 guides). The **technical analyst's `support_resistance` levels are plotted as dashed green (support) / red (resistance) annotation lines** with right-axis labels, bridging the *real* chart to the *analyst's* conclusions. `AnalysisView` threads `result.technical_analysis[symbol]` into `MarketDataCard`; a `SMA/EMA/BB/VWAP/RSI` studies toggle row drives visibility. Wheel-zoom + crosshair + tooltip preserved (tooltip shows hovered indicator values). | ✅ Done |
-| **13** | **Live news + sentiment feed (item 4)** — a real **News / Sentiment** tab in `MarketDataCard`: `GET /news?symbol=` (new `news-routes.ts`) pulls **Finnhub `/company-news`** headlines (tokenless after a free `FINNHUB_KEY`) and scores each with a **deterministic keyword-polarity model** (no LLM — auditable, free). When Finnhub is reachable, `data-ingestion.ts` overrides `sentiment_data[ticker]` with the real news score + `key_news`, so the **Sentiment Analyst's existing `realSent` hook fires** and turns its seeded verdict into a real one (zero analyst-code changes). The tab shows the real headline list (title / source / time / polarity chip) + aggregate sentiment, and — after an analysis run — the **Sentiment Analyst's own scored read** (news/social/analyst/institutional breakdown) threaded from `result.sentiment_analysis[symbol]`. Degrades to a shaped seeded headline set when no key/network. 9 backend + 2 frontend new tests. | ✅ Done |
-| **14** | **Comparable / multi-ticker analysis (item 5)** — a **Compare** toggle appears above the market-row when 2–5 tickers are in the current run. Compare mode replaces the per-ticker cards with a centerpiece `CompareView`: (1) a **normalized relative-performance chart** (each ticker rebased to 100, overlaid SVG lines + legend), (2) a **pairwise return-correlation matrix** (Pearson, color-coded green/red), and (3) a **side-by-side verdict table** (technical score/verdict + sentiment score per ticker, sourced from `result.technical_analysis[symbol]` / `sentiment_analysis[symbol]`). Price series are fetched live via `GET /history` (real when reachable, shaped mock otherwise) — same degradation pattern as the other market cards. Pure helpers in `compareUtils.ts` (normalizeToBase / dailyReturns / pearson / correlationMatrix / alignTail) are unit-tested with injected bars. 12 + 3 new tests. | ✅ Done |
-| **15** | **Stock Screener (item 6)** — `GET /screener?agencyId=&limit=&universe=` returns the **top-N most-promising tickers for the currently selected agency**, fast. `src/registry/logic/screener.ts` scores a candidate universe against the **agency's actual analyst composition** (derived axis weights from `agencies.ts`) using only **cheap, LLM-free signals**: `fetchPriceBars` (technical / momentum / volatility) + `fetchCompanyNews` / `scoreHeadline` (sentiment). A **bounded-concurrency pool (6 in-flight)** keeps it quick; the response includes `elapsedMs` + per-axis scores + a `topAxis` tag so the UI can label *why* each ticker ranked. Frontend `ScreenerPanel` sits above the market-row with a **Run** button, a top-N table (promise bar + tech / sentiment / momentum / verdict), an **elapsed-time readout**, and a **→ Analyze** button that sends the pick straight into the analysis tool. | ✅ Done |
-| **16** | **Watchlist / Portfolio layer (item 7)** — the persistent "my tickers" home. `src/lib/watchlist.ts` is an SSR-safe `localStorage` store with a reactive `useWatchlist()` hook (module-level pub/sub keeps every consumer in sync). `WatchlistBar` renders above the form so returning users land on a **portfolio view** (saved-symbol chips + add input), not a one-shot form; clicking a chip **deep-dives** through the analysis tool (`MarketDataCard`), and a × removes it. `MarketDataCard` gained a **watch star** (controlled `watched`/`onToggleWatch` props, falling back to the shared store when uncontrolled) so starring a market card promotes it into the watchlist — closing the loop between one-shot research and a saved portfolio. | ✅ Done |
-| **17** | **Options Greeks in the Options tab** — each option quote now carries **Black–Scholes greeks (Δ/Γ/ν/Θ/ρ)** re-derived from its implied volatility (`bsGreeks` in `src/registry/logic/greeks.ts`, already the project's single pricing source of truth). `GET /options-history` now returns a `greeks[]` array (one row per quote, computed for both the live Polygon chain and the mock fallback — so Greeks show even with no key/network). `MarketDataCard`'s Options tab renders a **separate per-strike Greeks subtable** (Call/Put side, Δ/Γ/ν/Θ/ρ) below the Call/Put table; vega is shown per 1 vol-point (ν/100) and theta per day (Θ/365), with a footnote explaining the scaling. No new data provider required. | ✅ Done |
-| **18** | **Real-data Stock Screener (truthful badge + UI)** — the screener now sources a **LIVE tradable universe** (NasdaqTrader listed directory, ~13k symbols; `UNIVERSE_PROVIDER=sp500` switches to a Wikipedia/CSV S&P 500 list) instead of a hardcoded 25-ticker list. Per-ticker price bars are pulled **live (Yahoo, tokenless, delayed ~15–20 min)** with a `mock` fallback only when the chart endpoint is throttled. The result carries a **semantically honest data-source badge**: `LIVE` (real universe + all live bars), `DELAYED` (real universe, some rows on mock bars — shows an `N/M live` sub-count), or `MOCK` (universe fell back AND zero live rows). A **Data lineage** block shows the universe pipeline (listed → parsed → pre-filtered → final pool, source + origin badge) and warns only when it genuinely fell back. The Promise column renders a **stacked bar / number / top-axis label**, the Run button shows a **live running timer** (e.g. `Screening… 12.3s`) during the 30–40s screen, and a **field legend** explains each column. Backend root-causes fixed: listed-reference crash, Nasdaq parser guards, Yahoo 429 retry + circuit-breaker after 2 empty batches, Wikipedia retry, live-unpriced fallback pool. 18 new backend universe tests + 12 frontend `ScreenerPanel` tests. | ✅ Done |
-| **19** | **API docs served same-origin + dynamic server host** — `GET /api-docs` (Swagger UI v5, dark mode) is served by the Express backend at runtime from `docs/openapi.json`; **not** generated at build time. The "View API docs" button now opens the **SPA's own origin** `/api-docs/` (proxied by Vite in dev, same origin in prod) instead of the Settings **Backend URI** (which pointed at `localhost:3001` and was unreachable on a LAN host). The served spec's `servers` entry is **rewritten from `HOST`/`PORT` env at request time** (falls back to `localhost:3001` when unset), so Swagger UI's "Servers" line matches how the server was actually started (e.g. `http://10.9.200.188:8091`). 3 new backend `api-docs-routes.test.ts` cases. | ✅ Done |
-| **20** | **Rebrand to TradingCorp** — every user-visible "Financial Analysis Pipeline" string is renamed to **TradingCorp** (app header `<h1>`, browser tab title, Swagger UI title, Socket.IO "Connected to…" message, OpenAPI `title`/`description`/`contact`, report PDF/HTML footers, both README headings, analyst-guide HTML, docs dir references). Package identity (`package.json` + `package-lock.json` `name`) → `tradingcorp`; the news fetch User-Agent and the Vite config comment updated to match. The internal LLM-vault crypto salt is intentionally **left unchanged** (renaming it would break decryption of saved credentials). | ✅ Done |
-| **21** | **Screener Timeframe + Instrument inputs (Phase 3)** — the Stock Screener panel gained two controls above Run: a **Timeframe** dropdown (5m / 1m / 90d / 1d / Auto) that maps to real `(interval, lookbackDays)` presets the backend's `fetchPriceBars` supports (no fake weekly/monthly bars), where an explicit preset overrides the agency horizon and `Auto` defers to `resolveScreenerProfile`; and an **Instrument** dropdown (Auto / Equity / Option) that resolves to the agency's declared instrument (`Auto` reads the option agencies' `OPTION`, else `EQUITY`), is sent to `GET /screener?instrument=` and reflected on the result with an honest `OPTION-LISTED` badge + note. Backend `screenTickers` now accepts/reflects `instrument`; the frontend `agencies.ts` mirror was corrected to actually carry `instrument: 'OPTION'` on the two options agencies (was a description-only mention — a latent mirror drift). 9 + 4 new frontend tests, 2 new backend tests. | ✅ Done (superseded by 22) |
-| **22** | **Screener horizon + asset class as agency-level defaults** — the per-run Timeframe/Instrument selects from Phase 21 were **removed**; horizon and instrument are now properties of the *agency*, not a per-run pick. Each `AgencyDef` carries three explicit, editable fields — `assetClass` (`EQUITY`/`OPTION`/`CRYPTO`), `screenerInterval` (`1m`/`5m`/`1h`/`4h`/`1d` — **1h/4h added**, each with a real bar generator in `hist.ts`: 1h step 3.6M ms, 4h step 14.4M ms, vwap present, count capped 390), and `screenerLookbackDays`. `resolveScreenerProfile(agencyId, agencyDef?)` merges explicit fields over per-category defaults (long/medium → EQUITY 1d/90d; intraday → EQUITY 5m/5d; crypto-screener → CRYPTO 1d/90d; options-swing → OPTION 1d/90d; options-intraday → OPTION 5m/5d). The three fields are edited on a **single row** in the Agency settings dialog and persisted via `PUT/POST /registry/agency`. The Stock Screener header shows the resolved profile as an **inline badge** `most promising for <agency> [interval · lookbackDays · assetClass]` that recomputes on agency switch. `CRYPTO` is selectable but honestly labelled "universe source TBD" (not yet screenable). See `docs/SCREENER_STANDARDS.md §8`. New backend profile-override + instrument + 1h/4h history tests; frontend Phase-22 panel + badge-switch tests. | ✅ Done |
-| **23** | **LLM model config no longer wiped by partial writes** — root-caused a bug where `.data/llm-config.json` could silently lose a role (e.g. `scanner`) and never recover it. Cause: `LlmConfigStore` held all 3 roles in memory but `JsonLlmStore` only persisted roles it had explicitly seen; once the on-disk file lost a role (older full-replace POST, or a stale client sending a partial `configs` array), every subsequent save re-flushed only the known subset, so the missing role stuck. Fix (`src/server/llm-config.ts`): (1) **self-heal on load** — the store re-seeds any canonical role missing from disk from defaults and writes it back; (2) **complete writes** — `put()` now persists **all** roles, so a single-role save (or partial POST) can never clobber the others. User selections are preserved (gaps filled, never overwritten). 2 new regression tests in `llm-config.test.ts`. | ✅ Done |
-| **24** | **Crypto agency hidden (deferred, hooks kept)** — the `crypto-screener` agency is **hidden from the selectable dropdown by default** because its real data sources (crypto universe provider + on-chain net-flow/active-address metrics) don't exist yet; shipping it now would be either fake data (violates the honest-labeling standard) or equity-in-disguise. Rather than delete it, `AgencyDef` gained a `hidden?: boolean` flag; `crypto-screener` sets it, the backend `/registry` list omits `hidden` agencies unless `ENABLE_CRYPTO_AGENCY=true`, and the frontend `AgencySelect` filters them. **All hooks stay intact**: the `onchain` analyst (declarative, LLM-free), `CRYPTO` asset-class enum, the resolver, and the existing `crypto-screener.test.ts`. Re-enabling later is a one-env-flag flip, no rework. 2 new backend tests (hidden-by-default + revealed-with-env). | ✅ Done |
-| **25** | **Live data-source integration + honest provenance** — the ingestion path now consumes **live inputs** instead of pure seeded demo data: Yahoo price/history/quote (tokenless), Alpha Vantage `OVERVIEW` fundamentals (keyed), and Finnhub `company-news` sentiment (keyed) each override their seeded block when reachable, via `fetchRealFinancialData`. Options ingestion targets **Massive/Polygon** (`api.massive.com`, Bearer) when entitled. Every domain reports a per-source provenance (`live`/`seeded`/`yahoo`/`polygon`/`cboe`) in `data_quality.sources` and the analyst trace notes, and the Results banner "MOCK — no live source" is gated on `dataHealth.sourcesOk === 0` (no false MOCK while live sources are green). Credentials live in the encrypted LLM vault (Settings dialog), not `.env`. | ✅ Done |
-| **26** | **CBOE free option-chain fallback + honest badges** — when Massive returns 401/403 (entitlement) or no key is set, `fetchOptionChain` falls through to the **free CBOE delayed feed** (`cdn.cboe.com/api/global/delayed_quotes/options/{TICKER}.json`, no key, UA Mozilla) — real bid/ask/iv + per-contract greeks, delayed ~15–20 min. `resolveLiveOptionsBundle` wires it into `options_ingestion` and the vol-surface / pricing / greeks / flow / risk side-panes, so those analysts compute on **real** delayed quotes. Source badge is honest: `LIVE` (Massive entitled) / `DELAYED` (CBOE) / `MOCK`; the RawDataDrawer provenance label + the small **orange** `.quote-warn` MOCK note reflect the true reason (e.g. "Massive key configured but live call returned 401"). Verified live (NVDA/AAPL/TSLA/SOFI). | ✅ Done |
-| **27** | **Correct options greeks (CBOE feed, real spot, decimal IV)** — root-caused delta pinning to ±1.0: the chain parser used a **median-strike heuristic as spot** and divided CBOE's already-decimal IV by 100. Fix (`parseCboeOptions` in `hist.ts`): read the real underlying from CBOE `current_price`, use CBOE's own Δ/Γ/ν/Θ/ρ directly (BS `bsGreeks` only as a per-field fallback), treat `iv: 0` as missing (fallback 0.3). A dedicated **BS-vs-CBOE parity test** (`src/tests/greeks-cboe-parity.test.ts`) validates our derived greeks against the real feed on a captured fixture (`fixtures/cboe-nvda-greeks.json`) plus an opt-in live layer (`RUN_LIVE_CBOE=1`); tolerances are mean + 95th-percentile (delta p95 ≈ 0.022) to avoid flaky live outliers, excluding 0–2 DTE. | ✅ Done |
-| **28** | **No-run chart preview (watchlist click / ticker blur)** — clicking a **Watchlist** chip or leaving the **Ticker symbols** input now fills in and shows the `MarketDataCard` chart **immediately**, without waiting for `[Analyze]`. `AnalysisView` keeps a separate `previewTickers` state (distinct from the run-owned `wallTickers`), validated via `getQuote` — if the symbol can't be resolved, **nothing** is shown (no card, no error). `[Analyze]` still starts the agency run and takes ownership of the card (preview cleared). 4 new frontend tests (chip preview / blur preview / not-found→nothing / Analyze transition). | ✅ Done |
 
 ---
 

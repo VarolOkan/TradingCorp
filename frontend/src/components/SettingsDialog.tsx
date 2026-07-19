@@ -1308,7 +1308,7 @@ export function SettingsDialog({
                     data-testid={`analyst-stage-${s}`}
                     onClick={() => setStageFilter(s)}
                   >
-                    {`Stage ${s} · ${s === 1 ? 'Intake' : s === 2 ? 'Analysis' : s === 3 ? 'Debate' : 'Decision'}`}
+                    {`${s} · ${s === 1 ? 'Intake' : s === 2 ? 'Analysis' : s === 3 ? 'Debate' : 'Decision'}`}
                   </button>
                   {s < 4 && (
                     <span className="stage-arrow" aria-hidden="true" data-testid={`stage-arrow-${s}`}>

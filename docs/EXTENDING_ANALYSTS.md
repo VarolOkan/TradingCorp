@@ -22,27 +22,31 @@ they replace the former `CREATING_AN_ANALYST.md` (concept) and
 An agency is just an **ordered list of analyst ids**. The graph derives the
 edges from `stage` + `dependsOn`:
 
-    ┌───────────────────────── AGENCY = ORDERED ANALYST LIST ─────────────────────┐
-    │         ( Stage 1 )                   ( Stage 2 )       ( Stage 3 )         │
-    │                                                                             │
+    ┌─────────────────── AGENCY = ORDERED ANALYST LIST ──────────────────────────┐
+    │   ( Stage 1 )        ( Stage 2 )      ( Stage 3 )        ( Stage 4 )        │
+    │                                                                            │
     │ orchestrator ─▶ data_ingestion ──┬──▶ fundamental ──┐                       │
     │                                  ├──▶ technical     ├─▶ risk ──┐            │
     │                                  ├──▶ sentiment     │          │            │
     │                                  ├──▶ contrarian    │          │            │
     │                                  └──▶ ...           ┘          ▼            │
-    │                                                           governance        │
+    │                                                       bull_researcher ┐     │
+    │                                                       bear_researcher ├─▶ governance
     │                                                                │            │
     │                                                                ▼            │
     │                                                          final_decision     │
-    └─────────────────────────────────────────────────────────────────────────────┘
+    └────────────────────────────────────────────────────────────────────────────┘
 
         Stage 1  chained in order, starting from the entry point
         Stage 2  FANS OUT from the last Stage-1 node (data ingestion)  ← runs in parallel
-        Stage 3  FANS IN  from ALL Stage-2 analysts (the decision gate)
+        Stage 3  Bull/Bear researchers — fan IN from Stage 2, debate the evidence
+        Stage 4  FANS IN from ALL Stage-3 researchers (the decision gate)
 
 Rule of thumb: **an analyst that needs data does Stage 2 and depends on
-`data_ingestion`**; **the one that decides is Stage 3**; **the one that gathers
-is Stage 1 (ingestion)**.
+`data_ingestion`**; **the Bull/Bear researchers are Stage 3**; **the one that
+decides is Stage 4** (the governance gatekeeper); **the one that gathers is Stage
+1 (ingestion)**. An agency typically has exactly one Stage-4 governance node and
+one (or a pair of) Stage-3 researchers.
 
 --------------------------------------------------------------------------------
 ## 1. QUICK START — add a "Contrarian" analyst (declarative, ~no code)
@@ -240,8 +244,7 @@ or a UI panel). If your analyst should influence the *final decision*, you wire
 its output into a Stage-3 reader (see §4).
 
 --------------------------------------------------------------------------------
-## 4. Integrating into Stage 1 / Stage 2 / Stage 3
---------------------------------------------------------------------------------
+## 4. Integrating into Stage 1 / Stage 2 / Stage 3 / Stage 4
 
 ### Stage 1 — Information Gathering (ingestion)
 You rarely add a Stage-1 node unless you are fetching a *new kind of raw data*
@@ -258,13 +261,20 @@ This is where almost every new analyst lives. Rules enforced by `AgencyGraph`:
     • runs in PARALLEL with the other Stage-2 analysts (fan-out)
     • writes its own output channel; does not need the others' output
 
-### Stage 3 — Decision (gatekeeper)
-Only ONE analyst should be Stage 3 per agency: the governance gatekeeper. It
-**fans in from all Stage-2 analysts** and issues the final verdict. You do NOT
-usually add a second Stage-3 node.
+### Stage 3 — Research Debate (Bull/Bear)
+The `bull_researcher` / `bear_researcher` analysts live here. They **fan in from
+all Stage-2 analysts**, argue the bull vs. bear case over the evidence, and emit
+a debate lean that the governance node reads. You normally do not add a new
+Stage-3 node — extend the existing researchers or add a paired researcher that
+feeds governance the same way.
+
+### Stage 4 — Decision (gatekeeper)
+Only ONE analyst should be Stage 4 per agency: the governance gatekeeper. It
+**fans in from the Stage-3 researchers** and issues the final verdict. You do NOT
+usually add a second Stage-4 node.
 
 If your new Stage-2 analyst should *influence the decision*, you do not make it
-Stage 3 — you make the governance node read your channel.
+Stage 3 or 4 — you make the governance node read your channel.
 
 --------------------------------------------------------------------------------
 ## 5. Anatomy of an AnalystDef (every field)

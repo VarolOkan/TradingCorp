@@ -82,30 +82,38 @@ TradingCorp/
 ├── docs/                 # documentation (this folder)
 │   ├── archive/          # superseded design docs (historical)
 │   └── openapi.json      # REST API spec (served live at /api-docs)
-├── frontend/             # React + Vite SPA (new front-end)
+├── frontend/             # React 18 + Vite 5 SPA (TypeScript)
 │   ├── index.html
 │   ├── src/
 │   │   ├── main.tsx
 │   │   ├── App.tsx
-│   │   ├── index.css     # Tailwind entry
+│   │   ├── index.css     # Tailwind directives + all app CSS
 │   │   ├── types.ts      # shared types (AnalysisResult, ConnectionSettings, …)
-│   │   ├── components/   # SettingsDialog, AnalysisForm, ResultsPanel, AnalysisView, ScreenerPanel, analysts/ (AnalystWall + AnalystTraceDrawer)
-│   │   ├── api/          # /config, /screener, quote/history/options/news clients
+│   │   ├── components/   # AnalysisForm/View, ResultsPanel, SettingsDialog, ScreenerPanel,
+│   │   │                 #   WatchlistBar, MarketDataCard, PriceChart, ReportsCalendar/ReportModal,
+│   │   │                 #   analysts/ (AnalystWall + AnalystTraceDrawer + Agency/Sources dialogs),
+│   │   │                 #   compare/ (multi-ticker perf + correlation)
+│   │   ├── api/          # one typed client per route group (config, llm-config, registry,
+│   │   │                 #   report, history, screener, news, quote, options-history, …)
 │   │   ├── hooks/        # useAnalysis + useAnalystRun (per-analyst streaming)
+│   │   ├── lib/          # watchlist.ts (localStorage store)
+│   │   ├── visualizations/ # RelationsGraph + Visualization registry
 │   │   └── test/         # Vitest setup + specs
 │   └── dist/             # production build output (generated)
 ├── src/                  # Backend (TypeScript, run via tsx)
-│   ├── server/           # Socket.IO + Express real-time server (serves frontend/dist)
-│   ├── orchestration/    # AgencyGraph builder + legacy graph shim
-│   ├── registry/         # analysts.ts + agencies.ts + logic/*.ts handlers
+│   ├── server/           # Socket.IO + Express server (serves frontend/dist);
+│   │                     #   *-routes.ts + report/decision-log/registry-store + LLM vault
+│   ├── orchestration/    # AgencyGraph builder + financial-graph shim
+│   ├── registry/         # analysts.ts + agencies.ts + logic/*.ts handlers + sources/ (multi-source)
 │   ├── nodes/            # generic-analyst.node.ts (the single data-driven node)
-│   ├── types/            # financial-analysis.ts (AgentState, InvestmentDecision, AnalystTrace, …)
+│   ├── prompts/          # analyst-instructions.ts + options-instructions.ts
+│   ├── types/            # financial-analysis.ts + registry.ts (AgentState, decisions, traces)
 │   ├── config.ts         # env-driven configuration
-│   └── utils/            # logger, retry-handler, parse-query, rng/seed helpers
+│   ├── utils/            # logger, retry-handler, parse-query
+│   └── tests/            # Jest backend specs + fixtures
 ├── vite.config.ts        # Vite + Vitest config (root: frontend/, proxies to backend)
-├── tsconfig.frontend.json
-├── tailwind.config.js
-├── postcss.config.js
+├── tsconfig.json / tsconfig.frontend.json
+├── postcss.config.js     # Tailwind + autoprefixer (no separate tailwind.config.js)
 ├── jest.config.js
 ├── package.json
 └── .env.example

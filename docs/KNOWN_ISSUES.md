@@ -176,11 +176,16 @@ Backend: `src/server/analyst-params.ts` (`AnalystParamsStore` + validate) and
 `AnalystTraceDrawer.test.tsx` (incl. a test proving the live flavor shows
 immediately after a save).
 
-**Not done (by design):** the saved weights/credentials/flavors are in-memory
-only (no persistence across server restarts) and — except for the Phase 3
-`/quote` endpoint — there is **no real data provider** behind a credential
-(Issue #2 still applies to analysis inputs; see §11 for the options
-historical-data work).
+**Persistence (was: in-memory only).** These stores now survive a server
+restart: **flavors** are mirrored to `.data/flavors.json` (`FLAVOR_STORE_PATH`),
+**source credentials** (Alpha Vantage / Finnhub / Polygon keys + URIs) are written
+through the same **encrypted LLM vault** as the LLM tokens (`llm-vault.ts`;
+falls back to in-memory only when `LLM_VAULT_PASSPHRASE` is unset), and
+**registry overrides** (agency/analyst edits) persist via `registry-store.ts`
+(JSON driver by default at `.data/registry-*.json`; `REGISTRY_STORE_DRIVER=sqlite`
+switches to `.data/registry.db`). Saved **weights** (`AnalystParamsStore`) remain
+in-memory (re-applied per run). Default (no override) is byte-identical to the
+pre-feature path (parity preserved).
 
 ## 10. Options agencies shipped (Phase A–D) — design notes & limitations
 

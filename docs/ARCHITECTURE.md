@@ -47,7 +47,12 @@ either way.
         └──────┬──────┘
                │
         ┌──────▼──────┐
-        │  Governance │  (Stage 3: Risky/Safe debate + veto + final decision)
+        │ Bull / Bear │  (Stage 3: researchers debate the Stage-2 evidence)
+        │ Researchers │
+        └──────┬──────┘
+               │
+        ┌──────▼──────┐
+        │  Governance │  (Stage 4: Risky/Safe debate + veto + final decision)
         │ Gatekeeper  │
         └──────┬──────┘
                │  conditional edges: continue → END, end → END
@@ -66,8 +71,15 @@ which resolves the `AnalystDef.logic.fn` key through `getLogicHandler`
 Wiring (for the long-term agency, built from the registry):
 
 - entry point `orchestrator`
-- `orchestrator → data_ingestion → fundamental → technical → sentiment → risk → governance`
+- `orchestrator → data_ingestion → fundamental → technical → sentiment → risk → bull_researcher / bear_researcher → governance`
 - conditional edges on `governance`: `continue → END`, `end → END`
+
+> **Stage model (4 tiers):** Stage 1 = data ingestion; Stage 2 = the analyst
+> pillars (fundamental / technical / sentiment / risk); Stage 3 = Bull & Bear
+> researchers who debate the Stage-2 evidence; Stage 4 = the Governance
+> Gatekeeper (Risky/Safe debate + preservation-first veto + final decision).
+> The Bull/Bear researchers were added in the recent enhancement work; governance
+> moved from Stage 3 to Stage 4 to sit after them.
 
 > Note: `shouldContinue()` currently returns `'end'` for every state, so the
 > conditional edge is effectively fixed. The "continue" branch exists as a hook
@@ -173,7 +185,8 @@ handler for `fn` analysts, or `declarativeHandler` for `declarative` analysts.
 | Technical Analyst | `registry/logic/technical.ts` | Produces `TechnicalAnalysis` (trend, indicators, support/resistance, signals). | Stage 2 |
 | Sentiment Analyst | `registry/logic/sentiment.ts` | Produces `SentimentAnalysis` (news/social/analyst/institutional sentiment). | Stage 2 |
 | Risk Analyst | `registry/logic/risk.ts` | Produces `RiskAssessment` (level, factors, position sizing, stop/take profit). | Stage 2 |
-| Governance Gatekeeper | `registry/logic/governance.ts` | Stage 3: Risky/Safe debate, then the final APPROVE/REJECT decision with a preservation-first veto. | Stage 3 (Trading Decision) |
+| Bull / Bear Researchers | `registry/analysts.ts` (`bull_researcher` / `bear_researcher`) + prompts in `prompts/analyst-instructions.ts` | Stage 3: argue the bull vs. bear case over the Stage-2 evidence; their debate lean feeds the governance decision. | Stage 3 (Research Debate) |
+| Governance Gatekeeper | `registry/logic/governance.ts` | Stage 4: extracts the Bull/Bear debate, runs the Risky/Safe debate, then the final APPROVE/REJECT decision with a preservation-first veto. | Stage 4 (Trading Decision) |
 | Options Ingestion | `registry/logic/options-handlers.ts` | Stage 1: builds a deterministic `HistoricalBundle` (OHLCV + expiries + per-expiry option quotes + underlying + rfr) and stashes it on `state.optionsData[ticker]`. | Options Stage 1 |
 | Volatility Surface | `registry/logic/vol-surface.ts` | Builds a `VolSurface` (term + skew) from the bundle; emits `call_iv`/`put_iv` channels. | Options Stage 2 |
 | Options Pricing | `registry/logic/options-handlers.ts` | Black–Scholes fair value vs market; flags `EDGE`/`THIN_EDGE`/`NO_EDGE`. | Options Stage 2 |
@@ -188,16 +201,18 @@ All handlers share one `NodeSurface` implementation (`makeNodeSurface()` in
 
 ### Stage rules (summary)
 
-The full rule set is in
-[root `README.md` phased plan, Phase 2](./README.md#frontend-rewrite--phased-plan) for the stage rules.
-In brief:
+The stage rules are summarized below (and the node responsibilities are listed
+in the table that follows). In brief:
 
 - **Stage 1 (gathering):** Bull/Bear balance, neutral synthesis, separate
-  news/social streams, date-stamped freshness. (Bull/Bear researchers are a
-  planned enhancement; today Data Ingestion is the single collection node.)
+  news/social streams, date-stamped freshness. Data Ingestion is the single
+  collection node.
 - **Stage 2 (analysis):** each analyst returns a structured object + direction +
   confidence; no silent `null` passes; independence between analysts.
-- **Stage 3 (decision):** Risky vs. Safe debate with a preservation-first
+- **Stage 3 (research debate):** the Bull and Bear researchers argue the bull vs.
+  bear case over the Stage-2 evidence; their debate lean is extracted and passed
+  to governance.
+- **Stage 4 (decision):** Risky vs. Safe debate with a preservation-first
   tie-breaker; gatekeeper veto; approval conditions (≤5% size, 15–20% stop-loss,
   monitor fundamentals); every decision ships `confidence` + `reasoning` +
   `preservation_rationale`.
@@ -339,7 +354,8 @@ Backend: each analyst handler calls `captureTrace(state, trace)` (the
 `analystTraces` channel is declared on the LangGraph `AgentState` so it survives
 the run, and `normalizeResult` ships it on `analysis_complete`.
 
-See the root `README.md` [phased plan](./README.md#frontend-rewrite--phased-plan) for the schedule.
+See `docs/KNOWN_ISSUES.md` for the live-data integration history and current
+limitations.
 
 ## Options agencies & data layer
 
@@ -486,7 +502,12 @@ pdf/md/html outputs are unchanged.
   ready).
 - The filename carries the **agency id** (e.g. `long-term`), the **first
   ticker** of the run, and the **time** (`HH-MM-SS`). Multi-ticker runs are still
-  saved in full; the name shows the first ticker.
+  saved in full; the name shows the first ticker, and a small
+  **`report-<id>.meta.json`** sidecar persists the *full* ticker list +
+  `companyName` so multi-symbol runs survive a disk reconcile / server restart
+  (the filename stem alone is lossy). The list scan skips `*.meta.json` so the
+  sidecar never appears as a phantom duplicate row; legacy reports with no
+  sidecar fall back to the `.json` raw-data dump (and are backfilled on first read).
 - Listing is by day (`GET /reports` → `{ byDay: { 'YYYY-MM-DD': ReportSummary[] } }`)
   where each summary carries `id`, `agencyId`, `tickers`, `companyName`,
   `generatedAt`, and per-format `files` paths.

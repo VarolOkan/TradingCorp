@@ -1446,20 +1446,22 @@ body {
 /* Stage sub-tabs above the analyst list (reuses the main tab look, scoped). */
 .analyst-stage-tabs {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.3rem;
   margin: 0 0 0.9rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 .analyst-stage-tabs .settings-tab {
   flex: 0 0 auto;
   background: #1e293b;
   border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 8px;
-  padding: 0.4rem 0.85rem;
+  padding: 0.35rem 0.65rem;
   color: #f1f5f9;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 .analyst-stage-tabs .settings-tab:hover:not(.active) {
   border-color: #c4b5fd;
