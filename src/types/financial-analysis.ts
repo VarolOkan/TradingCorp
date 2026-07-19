@@ -89,6 +89,9 @@ export interface AgentState {
     market: Record<string, any>;
     /** Fundamental shaped objects (seed-fallback today; live later). */
     fundamental: Record<string, any>;
+    /** Technical indicators (RSI/SMA/etc.) per ticker — populated from the live
+     *  Yahoo fetch so downstream analysts + debate evidence can cite them. */
+    technical: Record<string, any>;
     /** Sentiment shaped objects (seed-fallback today; live later). */
     sentiment: Record<string, any>;
     /** Provenance of the bars/market: live yahoo, mock, or mixed. */
@@ -407,6 +410,17 @@ export interface RiskAssessment {
     volatility_30d?: number;
     beta?: number;
   };
+
+  /** Concrete stop-loss PRICE derived from the real last price × stop pct.
+   *  Present only when real market price was available (data-driven). */
+  stop_loss_price?: number;
+  /** Concrete take-profit PRICE derived from the real last price × reward pct.
+   *  Present only when real market price was available (data-driven). */
+  take_profit_price?: number;
+  /** Evidence-backed risk factors derived from real ingested data
+   *  (news headlines, fundamental ratios, liquidity). Absent on the seeded
+   *  parity path; the generic seeded factors remain in `risk_factors`. */
+  evidence_factors?: Array<{ factor: string; severity: 'LOW' | 'MEDIUM' | 'HIGH'; detail: string }>;
 }
 
 /**
@@ -787,6 +801,19 @@ export interface AnalystTrace {
   };
   /** Free-form notes (assumptions, limitations, caveats). */
   notes?: string[];
+  /**
+   * Machine-readable provenance of this analyst's OUTPUT DATA.
+   *   - 'live'        → every driving input came from a live online source
+   *                     (real ingested scores, bars, news, fundamentals).
+   *   - 'mixed'       → some driving inputs live, some seeded fallback.
+   *   - 'seeded-parity' → NO live source contributed; output is deterministic
+   *                     seeded data (parity), NOT from online sources.
+   *   - 'none'        → analyst has no data source wired at all (e.g. a
+   *                     placeholder analyst with no live feed).
+   * The UI renders a badge from this so a fabricated-looking result is never
+   * mistaken for live data (semantic-honesty rule).
+   */
+  dataProvenance?: 'live' | 'mixed' | 'seeded-parity' | 'none';
   /** §4.9.4 machine-readable per-source status keyed by source id. */
   sourceStatus?: Record<string, 'ok' | 'skipped' | 'failed' | 'fallback'>;
   /** True if the analyst ran on fewer than its full source set. */

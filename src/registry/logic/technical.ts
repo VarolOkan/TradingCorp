@@ -253,6 +253,7 @@ export async function technicalHandler(
       notes: realBarsUsed.size > 0
         ? [`Technical verdict derived from real Yahoo OHLCV bars for: ${[...realBarsUsed].join(', ')}. Indicators + trend/momentum/volatility/support-resistance computed from price history.`]
         : ['No ingested price bars — technical ran on seeded fallback (wire live price history for auditable signals).'],
+      dataProvenance: realBarsUsed.size > 0 ? 'live' : 'seeded-parity',
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'technical', {

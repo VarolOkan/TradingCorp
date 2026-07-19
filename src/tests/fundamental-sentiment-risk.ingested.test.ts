@@ -108,4 +108,60 @@ describe('Phase F: risk reads ingested.market', () => {
     const a = traceOf(out, 'risk').output.details.assessments.AAPL;
     expect(a.data_driven).toBeUndefined();
   });
+
+  it('DATA-DRIVEN: computes concrete stop-loss/take-profit PRICES from real price + vol', async () => {
+    const state = baseState();
+    (state as any).ingested = {
+      bars: {},
+      market: { AAPL: { price: 200, beta: '1.2', volatility_30d: '0.4' } },
+      fundamental: {}, sentiment: {}, source: 'yahoo',
+    };
+    const out = await riskHandler(state, node, { horizon: 'LONG_TERM', params: {} });
+    const a = traceOf(out, 'risk').output.details.assessments.AAPL;
+    // stop_pct = clamp(vol*1.5, 0.03, maxStopLoss=0.15) = clamp(0.6, ...)=0.15
+    expect(a.stop_loss_suggestion).toBeCloseTo(0.15, 4);
+    // concrete prices off real $200
+    expect(a.stop_loss_price).toBeCloseTo(200 * (1 - 0.15), 2);
+    // take-profit 2:1 reward/risk → tpPct = 0.30
+    expect(a.take_profit_suggestion).toBeCloseTo(0.30, 4);
+    expect(a.take_profit_price).toBeCloseTo(200 * (1 + 0.30), 2);
+    // Numbers must be COHERENT with the real price (not the legacy random %).
+    expect(a.stop_loss_price).toBeLessThan(200);
+    expect(a.take_profit_price).toBeGreaterThan(200);
+  });
+
+  it('DATA-DRIVEN: derives evidence factors from real news + fundamentals', async () => {
+    const state = baseState();
+    (state as any).ingested = {
+      bars: {},
+      market: { AAPL: { price: 150, beta: '1.1', volatility_30d: '0.3', volume: 1_000_000 } },
+      fundamental: { AAPL: { key_ratios: { debt_to_equity: 3.2, profit_margin: -0.05 } } },
+      sentiment: { AAPL: { headlines: ['Company X announces layoffs amid lawsuit', 'Analyst downgrade on weak guidance'] } },
+      source: 'mixed',
+    };
+    const out = await riskHandler(state, node, { horizon: 'LONG_TERM', params: {} });
+    const a = traceOf(out, 'risk').output.details.assessments.AAPL;
+    const ev = a.evidence_factors ?? [];
+    expect(ev.length).toBeGreaterThanOrEqual(2);
+    // High D/E → balance-sheet factor; negative margin → profitability factor;
+    // negative news → company-specific factor.
+    expect(ev.some((f: any) => f.factor.includes('Balance-Sheet'))).toBe(true);
+    expect(ev.some((f: any) => f.factor.includes('Profitability'))).toBe(true);
+    expect(ev.some((f: any) => f.factor.includes('Company-Specific'))).toBe(true);
+    // Evidence factors cite the REAL number (not generic seeded text).
+    expect(ev.find((f: any) => f.factor.includes('Balance-Sheet')).detail).toMatch(/Debt\/Equity 3\.20/);
+  });
+
+  it('PARITY: real market price absent → no concrete prices, no evidence factors', async () => {
+    const state = baseState();
+    (state as any).ingested = {
+      bars: {}, market: { AAPL: { beta: '1.2', volatility_30d: '0.4' } }, // no price
+      fundamental: {}, sentiment: {}, source: 'yahoo',
+    };
+    const out = await riskHandler(state, node, { horizon: 'LONG_TERM', params: {} });
+    const a = traceOf(out, 'risk').output.details.assessments.AAPL;
+    expect(a.stop_loss_price).toBeUndefined();
+    expect(a.take_profit_price).toBeUndefined();
+    expect(a.evidence_factors === undefined || a.evidence_factors.length === 0).toBe(true);
+  });
 });

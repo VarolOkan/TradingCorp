@@ -144,6 +144,29 @@ export function AnalystTraceDrawer({
             <h2>{meta.name}</h2>
             <p className="role">{meta.role}</p>
           </div>
+          {trace.dataProvenance && (
+            <span
+              className={`trace-provenance-badge prov-${trace.dataProvenance}`}
+              title={
+                trace.dataProvenance === 'seeded-parity'
+                  ? 'Output is seeded/parity — NOT from live online sources'
+                  : trace.dataProvenance === 'mixed'
+                  ? 'Some inputs live, some seeded fallback'
+                  : trace.dataProvenance === 'none'
+                  ? 'No data source wired for this analyst'
+                  : 'Output derived from live online sources'
+              }
+              data-testid="trace-provenance-badge"
+            >
+              {trace.dataProvenance === 'seeded-parity'
+                ? '⚠ NOT live data'
+                : trace.dataProvenance === 'mixed'
+                ? '◐ mixed (some live)'
+                : trace.dataProvenance === 'none'
+                ? '∅ no source'
+                : '● live data'}
+            </span>
+          )}
           <button className="trace-close" onClick={onClose} aria-label="Close trace" data-testid="trace-close">
             ×
           </button>

@@ -200,6 +200,7 @@ export async function dataIngestionHandler(
       bars: ingestedBars,
       market: ingestedMarket,
       fundamental: output.fundamental_data ?? {},
+      technical: output.technical_data ?? {},
       sentiment: output.sentiment_data ?? {},
       source: ingestedSource,
     };

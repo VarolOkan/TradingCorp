@@ -246,11 +246,19 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
       fields: ['fundamental_score', 'technical_score', 'sentiment_score'],
       label: 'Analyst Team output',
       sources: ['(pipeline)'],
+    }, {
+      // §Live debate evidence: real technical signals + live headlines pulled
+      // from the ingested bundle so the debate can cite concrete evidence
+      // (price vs SMA, RSI, recent news) rather than only the summarized scores.
+      from: 'ingested',
+      fields: ['bars', 'technical', 'sentiment'],
+      label: 'Live debate evidence (price action + news)',
+      sources: ['Yahoo bars', 'Finnhub news'],
     }],
     features: [
-      { key: 'fundamental_score', label: 'Fundamental support', source: 'dataSources.0', aggregation: 'last' },
-      { key: 'technical_score', label: 'Technical support', source: 'dataSources.0', aggregation: 'last' },
-      { key: 'sentiment_score', label: 'Sentiment support', source: 'dataSources.0', aggregation: 'last' },
+      { key: 'fundamental_score', label: 'Fundamental support', source: 'analyst:fundamental:financial_health_score', aggregation: 'last' },
+      { key: 'technical_score', label: 'Technical support', source: 'analyst:technical:technical_score', aggregation: 'last' },
+      { key: 'sentiment_score', label: 'Sentiment support', source: 'analyst:sentiment:sentiment_score', aggregation: 'last' },
     ],
     logic: {
       mode: 'declarative',
@@ -293,11 +301,16 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
       fields: ['fundamental_score', 'technical_score', 'sentiment_score'],
       label: 'Analyst Team output',
       sources: ['(pipeline)'],
+    }, {
+      from: 'ingested',
+      fields: ['bars', 'technical', 'sentiment'],
+      label: 'Live debate evidence (price action + news)',
+      sources: ['Yahoo bars', 'Finnhub news'],
     }],
     features: [
-      { key: 'fundamental_score', label: 'Fundamental risk', source: 'dataSources.0', aggregation: 'last' },
-      { key: 'technical_score', label: 'Technical risk', source: 'dataSources.0', aggregation: 'last' },
-      { key: 'sentiment_score', label: 'Sentiment risk', source: 'dataSources.0', aggregation: 'last' },
+      { key: 'fundamental_score', label: 'Fundamental risk', source: 'analyst:fundamental:financial_health_score', aggregation: 'last' },
+      { key: 'technical_score', label: 'Technical risk', source: 'analyst:technical:technical_score', aggregation: 'last' },
+      { key: 'sentiment_score', label: 'Sentiment risk', source: 'analyst:sentiment:sentiment_score', aggregation: 'last' },
     ],
     logic: {
       mode: 'declarative',

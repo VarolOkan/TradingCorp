@@ -34,8 +34,13 @@ export async function riskHandler(
     }
 
     const assessments: Record<string, RiskAssessment> = {};
+    let anyDataDriven = false;
+    let anyEvidence = false;
     for (const ticker of state.tickers) {
-      assessments[ticker] = performRiskAnalysis(ticker, tuning, state.ingested);
+      const a = performRiskAnalysis(ticker, tuning, state.ingested);
+      assessments[ticker] = a;
+      if (a.data_driven) anyDataDriven = true;
+      if (a.evidence_factors && a.evidence_factors.length > 0) anyEvidence = true;
       // Phase R2 (RAW_DATA_DUMP.md): record which ingested slice risk consumed.
       const ingested = state.ingested;
       const market = ingested?.market?.[ticker];
@@ -75,18 +80,29 @@ export async function riskHandler(
       name: 'Risk Analyst',
       stage: 2,
       instructions: instructionFor('risk'),
-      inputs: state.tickers.map((ticker) => ({
-        ticker,
-        label: 'Risk inputs consumed (cross-analyst + market)',
-        data: {
-          risk_level: assessments[ticker]?.risk_level,
-          max_allocation_percent: assessments[ticker]?.max_allocation_percent,
-          stop_loss_suggestion: assessments[ticker]?.stop_loss_suggestion,
-          take_profit_suggestion: assessments[ticker]?.take_profit_suggestion,
-          factors: (assessments[ticker]?.risk_factors ?? []).map((f: any) => `${f.factor} [${f.severity}]`),
-        },
-        sources: ['Fundamental/Technical/Sentiment outputs', 'Market context (volatility index)'],
-      })),
+      inputs: state.tickers.map((ticker) => {
+        const a = assessments[ticker];
+        const ingested = state.ingested;
+        const market = ingested?.market?.[ticker];
+        return {
+          ticker,
+          label: 'Risk inputs consumed (cross-analyst + market)',
+          data: {
+            risk_level: a?.risk_level,
+            max_allocation_percent: a?.max_allocation_percent,
+            stop_loss_suggestion: a?.stop_loss_suggestion,
+            take_profit_suggestion: a?.take_profit_suggestion,
+            stop_loss_price: a?.stop_loss_price,
+            take_profit_price: a?.take_profit_price,
+            factors: (a?.risk_factors ?? []).map((f: any) => `${f.factor} [${f.severity}]`),
+            evidence_factors: (a?.evidence_factors ?? []).map((f: any) => `${f.factor} [${f.severity}]: ${f.detail}`),
+            market_price: market?.price,
+            volatility_30d: market?.volatility_30d,
+            beta: market?.beta,
+          },
+          sources: ['Fundamental/Technical/Sentiment outputs', 'Market context (volatility index)'],
+        };
+      }),
       weighting: [
         { label: 'Volatility & market regime', inputs: ['volatility_index', 'market_trend'], weight: 0.4, rationale: 'Higher volatility / bearish regime compresses allowable sizing.', contribution: 40, scale: '0..100 score weight' },
         { label: 'Idiosyncratic risk factors', inputs: ['risk_factors'], weight: 0.35, rationale: 'Severity-weighted factors scale the risk level up.', contribution: 35, scale: '0..100 score weight' },
@@ -97,7 +113,11 @@ export async function riskHandler(
         summary: generateAnalysisSummary(assessments),
         details: { assessments },
       },
-      notes: ['Preservation-first: sizing is inversely scaled to risk level and volatility.'],
+      notes: ['Preservation-first: sizing is inversely scaled to risk level and volatility.']
+        .concat(anyDataDriven
+          ? [`Risk escalation + stop/take-profit driven by REAL ingested market meta (volatility_30d / beta / price)${anyEvidence ? `; evidence factor(s) from live news/fundamentals` : ''}.`]
+          : ['No ingested market meta — risk ran on seeded fallback (wire live market data for auditable volatility/stop sizing).']),
+      dataProvenance: anyDataDriven ? 'live' : 'seeded-parity',
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'risk', { stage: 2, tickers: state.tickers });
@@ -150,9 +170,9 @@ function performRiskAnalysis(
   let riskLevel = determineRiskLevel(rng);
   const riskFactors = generateRiskFactors(rng);
   const portfolioImpact = assessPortfolioImpact(rng);
-  const positionSizingRecommendation = recommendPositionSizing(rng, riskLevel);
-  const stopLossSuggestion = calculateStopLoss(rng, maxStopLoss);
-  const takeProfitSuggestion = calculateTakeProfit(rng);
+  let positionSizingRecommendation = recommendPositionSizing(rng, riskLevel);
+  let stopLossSuggestion = calculateStopLoss(rng, maxStopLoss);
+  let takeProfitSuggestion = calculateTakeProfit(rng);
   let maxAllocationPercent = baseAllocation !== undefined
     ? Math.min(baseAllocation, calculateMaxAllocation(riskLevel))
     : calculateMaxAllocation(riskLevel);
@@ -162,10 +182,14 @@ function performRiskAnalysis(
   // assessment is coherent with the data-driven upstream analysts. Parity is
   // preserved: with no `ingested`, this block is skipped entirely.
   let dataDriven: RiskAssessment['data_driven'] | undefined;
+  let stopLossPrice: number | undefined;
+  let takeProfitPrice: number | undefined;
+  let evidenceFactors: RiskAssessment['evidence_factors'];
   const market = ingested?.market?.[ticker];
   if (market) {
     const vol30 = toNum(market.volatility_30d);
     const beta = toNum(market.beta);
+    const price = toNum(market.price);
     // Volatility bands (annualized-ish proxy from the 30d field): escalate level.
     if (vol30 !== null) {
       if (vol30 >= 0.6) riskLevel = escalate(riskLevel, 2);
@@ -182,7 +206,31 @@ function performRiskAnalysis(
       ...(vol30 !== null ? { volatility_30d: vol30 } : {}),
       ...(beta !== null ? { beta } : {}),
     };
+
+    // Data-driven stop / take-profit as CONCRETE PRICES off the real last price.
+    // Stop width scales with real volatility (wider vol → wider stop), clamped
+    // to the agency's max tolerance. Reward/risk 2:1 for the take-profit.
+    if (price !== null) {
+      const stopPct = vol30 !== null
+        ? Math.min(maxStopLoss, Math.max(0.03, Math.min(vol30 * 1.5, maxStopLoss)))
+        : maxStopLoss;
+      const tpPct = Math.min(0.5, stopPct * 2); // 2:1 reward/risk
+      stopLossPrice = parseFloat((price * (1 - stopPct)).toFixed(2));
+      takeProfitPrice = parseFloat((price * (1 + tpPct)).toFixed(2));
+      // Overwrite the (legacy random) percentage suggestions with the
+      // data-driven ones so the numeric output is coherent with the price.
+      stopLossSuggestion = parseFloat(stopPct.toFixed(4));
+      takeProfitSuggestion = parseFloat(tpPct.toFixed(4));
+    }
+
+    // Evidence-backed risk factors from REAL ingested data (when available).
+    evidenceFactors = buildEvidenceFactors(ticker, ingested, price);
   }
+
+  // Position-sizing narrative references the REAL max allocation (data-driven
+  // when market meta is present, else the seeded default).
+  positionSizingRecommendation = `Recommend allocating ${maxAllocationPercent}% of portfolio to this position` +
+    (stopLossPrice !== undefined ? `; hard stop at $${stopLossPrice}` : '');
 
   return {
     risk_level: riskLevel,
@@ -193,7 +241,76 @@ function performRiskAnalysis(
     take_profit_suggestion: takeProfitSuggestion,
     max_allocation_percent: maxAllocationPercent,
     ...(dataDriven ? { data_driven: dataDriven } : {}),
+    ...(stopLossPrice !== undefined ? { stop_loss_price: stopLossPrice } : {}),
+    ...(takeProfitPrice !== undefined ? { take_profit_price: takeProfitPrice } : {}),
+    ...(evidenceFactors && evidenceFactors.length > 0 ? { evidence_factors: evidenceFactors } : {}),
   } as RiskAssessment;
+}
+
+/**
+ * Build evidence-backed risk factors from REAL ingested data. Returns [] when
+ * no real evidence is available, so the generic seeded `risk_factors` remain
+ * the only factors (parity). Uses:
+ *  - real news headlines (sentiment) → company-specific / narrative risk,
+ *  - real fundamental ratios (debt/equity, profit margin) → balance-sheet risk,
+ *  - real volume (market) → liquidity risk.
+ */
+function buildEvidenceFactors(
+  ticker: string,
+  ingested: NonNullable<AgentState['ingested']>,
+  price: number | null,
+): NonNullable<RiskAssessment['evidence_factors']> {
+  const out: NonNullable<RiskAssessment['evidence_factors']> = [];
+  const sentiment = ingested.sentiment?.[ticker];
+  const fundamental = ingested.fundamental?.[ticker];
+  const market = ingested.market?.[ticker];
+
+  // Company-specific / narrative risk from REAL news.
+  const headlines: string[] = Array.isArray(sentiment?.headlines)
+    ? sentiment.headlines
+    : (typeof sentiment?.data?.headlines === 'string'
+      ? [sentiment.data.headlines]
+      : []);
+  if (headlines.length > 0) {
+    const neg = headlines.filter((h) => /layoff|lawsuit|recall|fraud|downgrade|miss|warning|probe|default|bankrupt/i.test(h)).length;
+    out.push({
+      factor: 'Company-Specific (live news)',
+      severity: neg > 0 ? 'HIGH' : headlines.length > 4 ? 'MEDIUM' : 'LOW',
+      detail: `${headlines.length} live headline(s)${neg > 0 ? `, ${neg} negative/${'flagged'}` : ''}; e.g. "${headlines[0]?.slice(0, 90)}"`,
+    });
+  }
+
+  // Balance-sheet risk from REAL fundamentals (Alpha Vantage OVERVIEW).
+  const d2e = toNum(fundamental?.key_ratios?.debt_to_equity ?? fundamental?.debt_to_equity);
+  const margin = toNum(fundamental?.key_ratios?.profit_margin ?? fundamental?.profit_margin);
+  if (d2e !== null && d2e > 2) {
+    out.push({
+      factor: 'Balance-Sheet Leverage',
+      severity: d2e > 3 ? 'HIGH' : 'MEDIUM',
+      detail: `Debt/Equity ${d2e.toFixed(2)} — elevated financial leverage`,
+    });
+  }
+  if (margin !== null && margin < 0) {
+    out.push({
+      factor: 'Profitability',
+      severity: 'MEDIUM',
+      detail: `Negative profit margin ${margin.toFixed(2)} — unprofitable operations`,
+    });
+  }
+
+  // Liquidity risk from REAL volume.
+  const vol = toNum(market?.volume);
+  if (vol !== null && vol > 0) {
+    const illiquid = price !== null && vol * price < 5_000_000; // < $5M notional/day
+    if (illiquid) {
+      out.push({
+        factor: 'Liquidity',
+        severity: 'MEDIUM',
+        detail: `Low daily notional (~$${(vol * (price ?? 0) / 1e6).toFixed(1)}M) — wider spreads / slippage on entry/exit`,
+      });
+    }
+  }
+  return out;
 }
 
 /** Coerce a possibly-string numeric field (mock uses toFixed strings). */

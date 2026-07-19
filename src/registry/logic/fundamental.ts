@@ -147,6 +147,9 @@ export async function fundamentalHandler(
         summary: generateAnalysisSummary(analyses),
         details: { analyses },
       },
+      dataProvenance: (anyLive || anyProxy) && !anySeeded ? 'live'
+        : (anyLive || anyProxy) && anySeeded ? 'mixed'
+        : 'seeded-parity',
       notes: honestNotes,
     });
 

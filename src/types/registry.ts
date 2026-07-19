@@ -66,7 +66,15 @@ export interface DataSourceSpec {
 export interface FeatureSpec {
   key: string;                    // feature name (referenced in weighting inputs)
   label?: string;                 // display label
-  source?: string;                // "dataSources.X" or "features.Y"
+  source?: string;                // "dataSources.X" | "features.Y" |
+                                  // "analyst:<id>:<field>" — read a REAL per-ticker
+                                  // score from an upstream analyst's trace
+                                  // (output.details.analyses[ticker][field]); when
+                                  // <field> is omitted, the analyst's top-level
+                                  // output.score is used. Falls back to the seeded
+                                  // mock spec when the upstream trace is absent
+                                  // (parity), so declarative Stage-3 researchers can
+                                  // consume the Stage-2 pillars' actual output.
   formula?: string;               // arithmetic expression
   aggregation?: 'avg' | 'sum' | 'min' | 'max' | 'last';
   scale?: {                       // optional rescale from input range to output range
@@ -82,6 +90,10 @@ export interface WeightingStepSpec {
   weight: number;                 // decimal [0..1]; sum across all steps should be 1.0
   rationale: string;              // why this weight was chosen
   scale?: string;                 // descriptive (e.g. "0..100 score weight")
+  invert?: boolean;               // when true, the feature's contribution uses the
+                                  // INVERTED value (100 - v on a 0..100 scale) — e.g.
+                                  // the Bear researcher, where a WEAK pillar score
+                                  // strengthens the bearish case.
   contribution?: number;          // computed at runtime
 }
 

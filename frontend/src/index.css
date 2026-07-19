@@ -1981,6 +1981,34 @@ body {
   padding: 0.05rem 0.45rem;
   text-transform: uppercase;
 }
+/* Data provenance badge (semantic honesty: never mistake seeded for live). */
+.trace-provenance-badge {
+  margin-left: 0.6rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.trace-provenance-badge.prov-live {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+}
+.trace-provenance-badge.prov-mixed {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+.trace-provenance-badge.prov-seeded-parity,
+.trace-provenance-badge.prov-none {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+}
 .trace-input-card {
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 10px;

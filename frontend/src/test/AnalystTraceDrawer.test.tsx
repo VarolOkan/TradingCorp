@@ -233,6 +233,30 @@ describe('AnalystTraceDrawer', () => {
     expect(screen.queryByTestId('trace-source-status')).toBeNull();
   });
 
+  it('Phase (b): renders a data-provenance badge; flags seeded-parity as NOT live data', () => {
+    const liveTrace = makeTrace({ dataProvenance: 'live' });
+    const { rerender } = render(
+      <AnalystTraceDrawer traces={[liveTrace]} analystId={'fundamental'} onClose={vi.fn()} onSelect={vi.fn()} />,
+    );
+    expect(screen.getByTestId('trace-provenance-badge')).toHaveTextContent('● live data');
+    expect(screen.getByTestId('trace-provenance-badge').className).toContain('prov-live');
+
+    const seededTrace = makeTrace({ dataProvenance: 'seeded-parity' });
+    rerender(
+      <AnalystTraceDrawer traces={[seededTrace]} analystId={'fundamental'} onClose={vi.fn()} onSelect={vi.fn()} />,
+    );
+    const seededBadge = screen.getByTestId('trace-provenance-badge');
+    expect(seededBadge).toHaveTextContent('⚠ NOT live data');
+    expect(seededBadge.className).toContain('prov-seeded-parity');
+  });
+
+  it('Phase (b): omits the provenance badge when dataProvenance is absent', () => {
+    render(
+      <AnalystTraceDrawer traces={[makeTrace({})]} analystId={'fundamental'} onClose={vi.fn()} onSelect={vi.fn()} />,
+    );
+    expect(screen.queryByTestId('trace-provenance-badge')).toBeNull();
+  });
+
   it('Phase I: shows the LIVE saved flavor immediately (not stale last-run trace.instructions)', () => {
     // Last run's instructions differ from the just-saved flavor.
     const trace = makeTrace({ instructions: 'OLD last-run instructions' });

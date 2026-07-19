@@ -107,6 +107,7 @@ export async function sentimentHandler(
       notes: usedLiveSentiment
         ? ['Sentiment driven by live Finnhub company-news; divergent news vs social is surfaced as a watch item.']
         : ['No live news feed configured — sentiment ran on seeded fallback; divergent news vs social is surfaced as a watch item.'],
+      dataProvenance: usedLiveSentiment ? 'live' : 'seeded-parity',
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'sentiment', {
