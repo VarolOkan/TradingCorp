@@ -386,10 +386,28 @@ describe('AnalysisView — no-run chart preview', () => {
     await waitFor(() => expect(screen.getByTestId('pill-AAPL')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Analyze'));
     // The run starts → the "Analyzing…" status <p> appears (the Analyze button
-    // also flips to "Analyzing…", so scope the query to the status paragraph).
+    // also flips to "Analyzing…", so scope the query to the status paragraph.
     expect(await screen.findByText(/Analyzing/, { selector: 'p.analyzing' })).toBeTruthy();
     // The card persists (now driven by the run's tickers, not the preview) — and
     // there is exactly ONE AAPL card, not a preview + run duplicate.
     expect(screen.getAllByTestId('market-card-AAPL').length).toBe(1);
+  });
+
+  it('removing a ticker pill closes its chart (preview does not keep it open)', async () => {
+    render(<AnalysisView socket={fakeSocket()} connected={true} />);
+    const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
+
+    // Preview AAPL via blur (adds it to previewTickers + pills), then commit a pill.
+    fireEvent.change(input, { target: { value: 'AAPL' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(screen.getByTestId('market-card-AAPL')).toBeTruthy());
+    fireEvent.change(input, { target: { value: 'AAPL' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByTestId('pill-AAPL')).toBeInTheDocument());
+
+    // Remove the pill — the chart must disappear (regression: previewTickers
+    // used to keep it graphed forever).
+    fireEvent.click(screen.getByTestId('pill-remove-AAPL'));
+    await waitFor(() => expect(screen.queryByTestId('market-card-AAPL')).toBeNull());
   });
 });

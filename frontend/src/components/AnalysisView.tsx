@@ -98,6 +98,18 @@ export function AnalysisView({
   // via a quote lookup; if the ticker isn't found, nothing is shown.
   const [previewTickers, setPreviewTickers] = useState<string[]>([]);
   const [previewChecking, setPreviewChecking] = useState(false);
+  // Bug fix: removing a ticker pill must close its chart. displayTickers is
+  // `symbolPills ∪ previewTickers` before any run, so a pill removed from
+  // symbolPills stays graphed as long as it lingers in previewTickers (e.g.
+  // from a prior Watchlist-chip click or blur-preview). Reconcile the preview
+  // set against the live pills on every pill change so a removed ticker
+  // actually disappears. (After a run, wallTickers drives the graph instead.)
+  useEffect(() => {
+    setPreviewTickers((prev) => {
+      const still = prev.filter((t) => symbolPills.includes(t));
+      return still.length === prev.length ? prev : still;
+    });
+  }, [symbolPills]);
   // Validate a candidate symbol against the quote endpoint. Resolves to the
   // upper-cased symbol if it exists, or null if not found / errored.
   const resolvePreview = async (raw: string): Promise<string[]> => {

@@ -3114,11 +3114,21 @@ body {
   overflow: hidden;
   padding-right: 0;
 }
+/* Chart toolbar: interval + study toggles on ONE wrapping flex row so
+   both groups sit on a single line at wide widths (e.g. 1200px). Each
+   sub-group keeps its own flex context. */
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+  margin-bottom: 0.4rem;
+}
 .market-interval {
   display: flex;
   gap: 0.3rem;
   justify-content: flex-end;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0;
 }
 .interval-btn {
   padding: 0.2rem 0.55rem;

@@ -445,6 +445,23 @@ describe('MarketDataCard (Phase M)', () => {
     expect(screen.getByTestId('indicator-ema12')).toBeInTheDocument();
   });
 
+  it('places the interval + study buttons in ONE wrapping toolbar row', async () => {
+    render(<MarketDataCard symbol="AAPL" />);
+    await waitFor(() => expect(screen.getByTestId('chart-studies')).toBeInTheDocument());
+    // Both groups live inside a single .chart-toolbar so they share one row
+    // at wide widths (e.g. 1200px) instead of stacking into two rows.
+    const toolbar = screen.getByTestId('market-interval').closest('.chart-toolbar');
+    expect(toolbar).not.toBeNull();
+    expect(toolbar).toContainElement(screen.getByTestId('chart-studies'));
+    // All 6 interval + 5 study buttons are present (no group dropped).
+    for (const id of ['1wk', '1d', '4h', '1h', '5m', '1m']) {
+      expect(screen.getByTestId(`interval-${id}`)).toBeInTheDocument();
+    }
+    for (const s of ['sma', 'ema', 'bb', 'vwap', 'rsi']) {
+      expect(within(toolbar as HTMLElement).getByTestId(`study-${s}`)).toBeInTheDocument();
+    }
+  });
+
   it('renders the News tab with real headlines + aggregate sentiment', async () => {
     const news = {
       ticker: 'AAPL',

@@ -286,21 +286,23 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
       <div className="market-tab-body" data-testid="market-tab-body">
         {tab === 'chart' && (
           <div className="market-chart-pane">
-            <div className="market-interval" data-testid="market-interval">
-              {INTERVALS.map((iv) => (
-                <button
-                  key={iv.id}
-                  className={`interval-btn ${interval === iv.id ? 'active' : ''}`}
-                  onClick={() => setInterval(iv.id)}
-                  data-testid={`interval-${iv.id}`}
-                >
-                  {iv.label}
-                </button>
-              ))}
-            </div>
-            {histErr && <p className="quote-error" role="alert" data-testid="chart-error">{histErr}</p>}
-            {!histErr && chartBars.length > 0 ? (
-              <>
+            {/* Interval + study toggles live in ONE wrapping flex row
+                (.chart-toolbar) so at wide widths (e.g. 1200px) all 11
+                buttons sit on a single line instead of stacking into two. */}
+            <div className="chart-toolbar">
+              <div className="market-interval" data-testid="market-interval">
+                {INTERVALS.map((iv) => (
+                  <button
+                    key={iv.id}
+                    className={`interval-btn ${interval === iv.id ? 'active' : ''}`}
+                    onClick={() => setInterval(iv.id)}
+                    data-testid={`interval-${iv.id}`}
+                  >
+                    {iv.label}
+                  </button>
+                ))}
+              </div>
+              {!histErr && chartBars.length > 0 && (
                 <div className="chart-studies" data-testid="chart-studies">
                   {(['sma', 'ema', 'bb', 'vwap', 'rsi'] as StudyId[]).map((s) => (
                     <button
@@ -315,15 +317,18 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
                     </button>
                   ))}
                 </div>
-                <PriceChart
-                  bars={chartBars}
-                  height={340}
-                  ariaLabel={`${sym} price chart`}
-                  supportResistance={technical?.support_resistance ?? null}
-                  studies={studies}
-                  showTime={interval === '5m' || interval === '1m' || interval === '1h' || interval === '4h'}
-                />
-              </>
+              )}
+            </div>
+            {histErr && <p className="quote-error" role="alert" data-testid="chart-error">{histErr}</p>}
+            {!histErr && chartBars.length > 0 ? (
+              <PriceChart
+                bars={chartBars}
+                height={340}
+                ariaLabel={`${sym} price chart`}
+                supportResistance={technical?.support_resistance ?? null}
+                studies={studies}
+                showTime={interval === '5m' || interval === '1m' || interval === '1h' || interval === '4h'}
+              />
             ) : (
               !histErr && <p className="history-loading" data-testid="chart-loading">Loading {sym} chart…</p>
             )}
