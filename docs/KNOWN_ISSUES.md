@@ -5,6 +5,28 @@ what is mock-gated, and what is a known external gap. Fixed/resolved work has
 been removed; the full history lives in `docs/archive/`. Run `npm test` for the
 current pass/fail state.
 
+## 0. Session switcher UI removed (backend plumbing retained)
+
+The frontend no longer exposes any session-control UI. The "Session ID"
+text input that sat under the Ticker symbols form (`AnalysisForm`) was
+removed, and the `onSessionChange` prop was dropped from `AnalysisForm`,
+`AnalysisView`, and `App`. The `sessionId` **value** plumbing is
+intact and still hardcoded to `'default'` everywhere:
+
+- `App.tsx` keeps `useState('default')` for `sessionId` and still
+  threads it into `AnalysisView` and `SettingsDialog`.
+- The backend (`src/server/analyst-config.ts`) still keys source
+  credentials as `sessionId:analystId:sourceId`, and the encrypted
+  vault deliberately ignores the session (single-tenant per server).
+- `AnalysisView` still uses `sessionId` for analyst-flavor loads and the
+  agency run.
+
+**Why:** multi-session is out of scope right now. The wiring exists for a
+future session switcher, but with only one session (`'default'`) the
+input was dead weight (nothing ever set a non-default id). If session
+switching is added later, restore the `onSessionChange` prop chain and
+re-add the `AnalysisForm` "Session ID" input that was removed here.
+
 ## 1. Scoring/verdicts remain deterministic (seeded) models
 
 The per-analyst *scoring* verdicts are produced by deterministic handlers that

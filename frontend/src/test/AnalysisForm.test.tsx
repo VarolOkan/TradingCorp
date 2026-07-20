@@ -90,23 +90,6 @@ describe('AnalysisForm (pill input)', () => {
     expect(screen.getByLabelText('Ticker symbols')).toBeDisabled();
   });
 
-  it('renders the session field when onSessionChange is provided', () => {
-    const onSessionChange = vi.fn();
-    render(
-      <AnalysisForm
-        symbols={[]}
-        onSymbolsChange={vi.fn()}
-        onSubmit={vi.fn()}
-        onSessionChange={onSessionChange}
-        sessionId="abc"
-      />,
-    );
-    const session = screen.getByLabelText('Session ID') as HTMLInputElement;
-    expect(session.value).toBe('abc');
-    fireEvent.change(session, { target: { value: 'xyz' } });
-    expect(onSessionChange).toHaveBeenCalledWith('xyz');
-  });
-
   it('rejects a non-symbol word (e.g. IRON), shows an error ABOVE the input, and clears it on edit', async () => {
     vi.stubGlobal(
       'fetch',

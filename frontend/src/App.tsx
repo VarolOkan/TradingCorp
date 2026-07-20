@@ -189,7 +189,6 @@ function App() {
           socket={socket}
           connected={connected}
           sessionId={sessionId}
-          onSessionChange={setSessionId}
           sourceCatalog={sourceCatalog}
           agencyId={agencyId}
           onAgencyChange={setAgencyId}

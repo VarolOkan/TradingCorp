@@ -26,7 +26,6 @@ export interface AnalysisViewProps {
   socket: Socket | null;
   connected: boolean;
   sessionId?: string;
-  onSessionChange?: (id: string) => void;
   /** B1: catalog of analysts that declare a LIVE+auth source (drives ⚙ button). */
   sourceCatalog?: AnalystSourceCatalog;
   /** B1: sources already configured (shows ✓ instead of ⚙). */
@@ -52,7 +51,6 @@ export function AnalysisView({
   socket,
   connected,
   sessionId = 'default',
-  onSessionChange,
   sourceCatalog = { analysts: [] },
   configuredSourceKeys = new Set<string>(),
   agencyId: agencyIdProp,
@@ -385,8 +383,6 @@ export function AnalysisView({
             <AnalysisForm
               onSubmit={handleSubmit}
               running={running}
-              sessionId={sessionId}
-              onSessionChange={onSessionChange}
               symbols={symbolPills}
               onSymbolsChange={setSymbolPills}
               // Leaving the Ticker symbols field previews the chart for whatever

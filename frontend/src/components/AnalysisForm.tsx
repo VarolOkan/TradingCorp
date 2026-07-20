@@ -7,8 +7,6 @@ export const MAX_SYMBOLS = 6;
 export interface AnalysisFormProps {
   onSubmit: (tickers: string[]) => void;
   running?: boolean;
-  sessionId?: string;
-  onSessionChange?: (id: string) => void;
   /** Controlled list of ticker pills owned by the parent. */
   symbols: string[];
   /** Called whenever the pill list changes (add / remove). */
@@ -24,8 +22,6 @@ function normalize(raw: string): string {
 export function AnalysisForm({
   onSubmit,
   running = false,
-  sessionId,
-  onSessionChange,
   symbols,
   onSymbolsChange,
   onBlur,
@@ -149,19 +145,6 @@ export function AnalysisForm({
           />
         </div>
       </label>
-
-      {onSessionChange && (
-        <label className="session-field">
-          Session ID
-          <input
-            type="text"
-            value={sessionId ?? 'default'}
-            aria-label="Session ID"
-            disabled={running}
-            onChange={(e) => onSessionChange(e.target.value)}
-          />
-        </label>
-      )}
 
       <button type="submit" className="analyze-btn" disabled={running || symbols.length === 0}>
         {running ? 'Analyzing…' : 'Analyze'}
