@@ -65,6 +65,21 @@ describe('Phase D — options agency end-to-end (STOP criterion)', () => {
     expect(result.investment_thesis).toMatch(/OPTIONS/);
   });
 
+  it('provenance: options analysts + governance report seeded-parity when no live key (no silent live claim)', async () => {
+    const graph = new AgencyGraph(AGENCIES['options-intraday']!);
+    const result = await graph.execute(makeInitialState(['TSLA']));
+    const traces = result.analystTraces ?? [];
+    // No Polygon key in test env → deterministic mock bundle → every options
+    // analyst must be honestly flagged seeded-parity (never read as live data).
+    for (const id of optionAnalysts('options-intraday')) {
+      const t = traces.find((x: any) => x.analyst === id);
+      expect(t).toBeTruthy();
+      expect(t!.dataProvenance).toBe('seeded-parity');
+    }
+    const gov = traces.find((x: any) => x.analyst === 'governance');
+    expect(gov!.dataProvenance).toBe('seeded-parity');
+  });
+
   it('options-swing runs end-to-end: populated final_decision + option traces', async () => {
     const graph = new AgencyGraph(AGENCIES['options-swing']!);
     const result = await graph.execute(makeInitialState(['AAPL']));

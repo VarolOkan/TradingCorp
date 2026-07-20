@@ -49,17 +49,26 @@ vi.mock('../api/historyClient', () => ({
   }),
 }));
 
-// Type a ticker into the pill input and commit it with Enter.
-function addTicker(symbol: string) {
+// `addSymbol` validates via the (unmocked) server, so pills commit asynchronously.
+// Mock it to resolve instantly as "all valid" so the pill renders without a
+// real network round-trip (mirrors quoteClient/historyClient mocks above).
+vi.mock('../api/symbolClient', () => ({
+  validateSymbolsClient: vi.fn(async () => ({ results: [], valid: [], invalid: [] })),
+}));
+
+// Type a ticker into the pill input and commit it with Enter, then wait for the
+// pill to actually appear (addSymbol is async — it validates server-side first).
+async function addTicker(symbol: string) {
   const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
   fireEvent.change(input, { target: { value: symbol } });
   fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => expect(screen.getByTestId(`pill-${symbol}`)).toBeInTheDocument());
 }
 
 describe('Compare entry UX (pill input)', () => {
   it('1 ticker: no Compare button, shows guidance hint', async () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
-    addTicker('AAPL');
+    await addTicker('AAPL');
     expect(screen.queryByTestId('compare-toggle')).toBeNull();
     const guide = await screen.findByTestId('compare-hint-guide');
     expect(guide.textContent).toMatch(/2–6 tickers/);
@@ -67,8 +76,8 @@ describe('Compare entry UX (pill input)', () => {
 
   it('2 tickers but no run: prompts to Analyze first (no empty verdicts)', async () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
-    addTicker('AAPL');
-    addTicker('MSFT');
+    await addTicker('AAPL');
+    await addTicker('MSFT');
     // Without a completed [Analyze] run covering the tickers, the Compare button
     // must NOT appear — instead a hint tells the user to run Analyze first.
     expect(screen.queryByTestId('compare-toggle')).toBeNull();
@@ -93,8 +102,8 @@ describe('Compare entry UX (pill input)', () => {
       }
     };
     render(<AnalysisView socket={socket} connected={true} />);
-    addTicker('AAPL');
-    addTicker('MSFT');
+    await addTicker('AAPL');
+    await addTicker('MSFT');
     fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
     const toggle = await screen.findByTestId('compare-toggle');
     expect(toggle.textContent).toContain('Compare tickers');
@@ -111,10 +120,18 @@ describe('Compare entry UX (pill input)', () => {
 
   it('caps at 6 pills in the input box', async () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
-    ['A', 'B', 'C', 'D', 'E', 'F', 'G'].forEach(addTicker);
+    const input = screen.getByLabelText('Ticker symbols') as HTMLInputElement;
+    for (const s of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      await addTicker(s);
+    }
+    // The 7th is rejected by the hard cap — type+Enter but it must NOT become a pill.
+    fireEvent.change(input, { target: { value: 'G' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
     // Only 6 should render.
-    ['A', 'B', 'C', 'D', 'E', 'F'].forEach((s) =>
-      expect(screen.getByTestId(`pill-${s}`)).toBeInTheDocument(),
+    await waitFor(() =>
+      ['A', 'B', 'C', 'D', 'E', 'F'].forEach((s) =>
+        expect(screen.getByTestId(`pill-${s}`)).toBeInTheDocument(),
+      ),
     );
     expect(screen.queryByTestId('pill-G')).toBeNull();
   });
@@ -122,15 +139,14 @@ describe('Compare entry UX (pill input)', () => {
   it('shows the full collection: entered pills + watchlist clicks graph together', async () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
     // Enter two tickers as pills.
-    addTicker('AAPL');
-    addTicker('MSFT');
+    await addTicker('AAPL');
+    await addTicker('MSFT');
     // Click two watchlist chips (TSLA, NVDA) — each should ADD, not replace.
-    fireEvent.change(screen.getByTestId('watchlist-input'), { target: { value: 'TSLA' } });
-    fireEvent.click(screen.getByTestId('watchlist-add-btn'));
-    fireEvent.click(screen.getByTestId('watchlist-open-TSLA'));
-    fireEvent.change(screen.getByTestId('watchlist-input'), { target: { value: 'NVDA' } });
-    fireEvent.click(screen.getByTestId('watchlist-add-btn'));
-    fireEvent.click(screen.getByTestId('watchlist-open-NVDA'));
+    for (const sym of ['TSLA', 'NVDA']) {
+      fireEvent.change(screen.getByTestId('watchlist-input'), { target: { value: sym } });
+      fireEvent.click(screen.getByTestId('watchlist-add-btn'));
+      fireEvent.click(await screen.findByTestId(`watchlist-open-${sym}`));
+    }
 
     // All four tickers appear as market cards (the collection, not just the last).
     await waitFor(() =>
@@ -152,8 +168,8 @@ describe('Compare entry UX (pill input)', () => {
 
   it('removing a pill removes that ticker\'s chart (even after Analyze)', async () => {
     render(<AnalysisView socket={fakeSocket()} connected={true} />);
-    addTicker('AAPL');
-    addTicker('MSFT');
+    await addTicker('AAPL');
+    await addTicker('MSFT');
     // Run the analysis — wallTickers is populated synchronously by handleSubmit.
     fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
     await waitFor(() => expect(screen.getByTestId('market-card-AAPL')).toBeTruthy());

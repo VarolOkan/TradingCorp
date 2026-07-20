@@ -104,11 +104,14 @@ export async function runFnOptionsAnalyst(
 
     const results: Record<string, PerTickerResult> = {};
     const perTickerInputs: Array<{ ticker: string; label: string; data: Record<string, any>; sources: string[] }> = [];
+    let anyMockBundle = false;
+    let anyLiveBundle = false;
     for (const ticker of state.tickers) {
       const bundle = await resolveBundle(updatedState, ticker, tuning);
       const r = cfg.compute(ticker, bundle, tuning);
       results[ticker] = r;
       perTickerInputs.push({ ticker, label: cfg.inputLabel, data: r.data, sources: cfg.sources });
+      if (bundle.mock === true) anyMockBundle = true; else anyLiveBundle = true;
 
       // Phase R3 (RAW_DATA_DUMP.md): record exactly which optionsData slices
       // this analyst received, so the per-analyst export annotation shows the
@@ -170,6 +173,13 @@ export async function runFnOptionsAnalyst(
         summary,
         details: { results },
       },
+      // Semantic honesty: surface the bundle's live/mock provenance so a
+      // deterministic mock options run is never mistaken for live Polygon data.
+      // Aggregate across tickers: if every bundle was mock → seeded-parity;
+      // if every bundle live → live; if mixed → mixed.
+      dataProvenance: anyLiveBundle && !anyMockBundle ? 'live'
+        : anyLiveBundle && anyMockBundle ? 'mixed'
+        : 'seeded-parity',
       notes: cfg.notes ?? [],
     });
 

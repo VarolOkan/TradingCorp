@@ -203,6 +203,11 @@ export async function governanceHandler(
         summary: generateDecisionSummary(overallDecision, decisions, riskAssessments),
         details: { overall: overallDecision, perTicker: decisions, debate: debateNotes.length ? { bull: debate.bull, bear: debate.bear, netLean } : undefined },
       },
+      // Governance's liveness is inherited from its upstream analysts. If the
+      // whole upstream run was seeded, governance's verdict rests on seeded data.
+      dataProvenance: !reflection || !reflection.dataDriven
+        ? 'seeded-parity'
+        : reflection.source === 'mixed' ? 'mixed' : 'live',
       notes: [overallDecision.preservation_rationale, ...(reflectionNote ? [reflectionNote] : []), ...debateNotes, ...decisionReflections].filter(Boolean) as string[],
     });
 

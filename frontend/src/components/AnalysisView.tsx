@@ -433,17 +433,19 @@ export function AnalysisView({
         <CompareView tickers={symbolPills} result={result} />
       ) : (
         (() => {
-          // The input pills are the source of truth for what the user wants
-          // graphed. Filter the active data source (the last run if any, else
-          // the preview set) down to tickers still in the input, so removing a
-          // pill removes that ticker's chart. Fall back to the pills themselves
-          // when nothing from the run/preview overlaps the input.
-          const source = wallTickers.length > 0 ? wallTickers : previewTickers;
-          let displayTickers = source.filter((t) => symbolPills.includes(t));
-          if (displayTickers.length === 0) {
-            displayTickers = symbolPills.length > 0
-              ? symbolPills
-              : [...new Set([...symbolPills, ...previewTickers])];
+          // What to graph:
+          //  - After a run (wallTickers set), show the run's tickers that are
+          //    still in the input (removing a pill removes that chart).
+          //  - Before any run, show EVERYTHING the user has indicated: the
+          //    manually-entered pills UNIONed with any no-run preview tickers
+          //    (e.g. from watchlist-chip clicks). The preview set must NOT
+          //    shadow the pills — clicking a watchlist chip adds to the pills
+          //    AND previews, so both must remain graphed.
+          let displayTickers: string[];
+          if (wallTickers.length > 0) {
+            displayTickers = wallTickers.filter((t) => symbolPills.includes(t));
+          } else {
+            displayTickers = [...new Set([...symbolPills, ...previewTickers])];
           }
           return (
             displayTickers.length > 0 && (

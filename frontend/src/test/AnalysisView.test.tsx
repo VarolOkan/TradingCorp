@@ -52,6 +52,13 @@ vi.mock('../api/screenerClient', () => ({
   })),
 }));
 
+// Watchlist "Add" validates via the server (validateSymbolsClient). Mock it to
+// resolve instantly as "all valid" so the chip renders without a real network
+// round-trip (mirrors quoteClient/screenerClient mocks above).
+vi.mock('../api/symbolClient', () => ({
+  validateSymbolsClient: vi.fn(async () => ({ results: [], valid: [], invalid: [] })),
+}));
+
 function fakeSocket(): Socket {
   return {
     on: vi.fn(),
@@ -303,7 +310,7 @@ describe('AnalysisView — screener "→ Add" adds to Ticker symbols, stays open
     // Add a ticker to the watchlist, then click its chip.
     fireEvent.change(screen.getByTestId('watchlist-input'), { target: { value: 'TSLA' } });
     fireEvent.click(screen.getByTestId('watchlist-add-btn'));
-    fireEvent.click(screen.getByTestId('watchlist-open-TSLA'));
+    fireEvent.click(await screen.findByTestId('watchlist-open-TSLA'));
 
     // The chip click seeds the Ticker symbols field with the symbol (as a pill)...
     expect(screen.getByTestId('pill-TSLA')).toBeInTheDocument();
@@ -328,7 +335,7 @@ describe('AnalysisView — no-run chart preview', () => {
 
     fireEvent.change(screen.getByTestId('watchlist-input'), { target: { value: 'NVDA' } });
     fireEvent.click(screen.getByTestId('watchlist-add-btn'));
-    fireEvent.click(screen.getByTestId('watchlist-open-NVDA'));
+    fireEvent.click(await screen.findByTestId('watchlist-open-NVDA'));
 
     // The chart card appears immediately...
     await waitFor(() => expect(screen.getByTestId('market-card-NVDA')).toBeTruthy());
@@ -372,10 +379,15 @@ describe('AnalysisView — no-run chart preview', () => {
     await waitFor(() => expect(screen.getByTestId('market-card-AAPL')).toBeTruthy());
 
     // Commit the ticker as a pill (explicit Enter), then run — the agency work starts.
+    // addSymbol validates via the (mocked) server, so the pill is committed
+    // asynchronously — wait for it before clicking Analyze.
     fireEvent.change(input, { target: { value: 'AAPL' } });
     fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByTestId('pill-AAPL')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Analyze'));
-    expect(screen.getByText('Analyzing…')).toBeTruthy();
+    // The run starts → the "Analyzing…" status <p> appears (the Analyze button
+    // also flips to "Analyzing…", so scope the query to the status paragraph).
+    expect(await screen.findByText(/Analyzing/, { selector: 'p.analyzing' })).toBeTruthy();
     // The card persists (now driven by the run's tickers, not the preview) — and
     // there is exactly ONE AAPL card, not a preview + run duplicate.
     expect(screen.getAllByTestId('market-card-AAPL').length).toBe(1);

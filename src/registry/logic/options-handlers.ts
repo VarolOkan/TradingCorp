@@ -277,6 +277,7 @@ export async function optionsIngestionHandler(
         anyLive
           ? ['Live Polygon option chain + Yahoo price bars wired into ingestion.']
           : ['Mock chain + BS greeks — set POLYGON_API_KEY to wire live Polygon data.'],
+      dataProvenance: anyLive ? 'live' : 'seeded-parity',
     });
 
     node.emitProgress(updatedState, 'analyst:done', 'options_ingestion', {
