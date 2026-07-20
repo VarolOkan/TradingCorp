@@ -290,8 +290,29 @@ export async function optionsIngestionHandler(
     return updatedState;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return {
+    // SEMANTIC HONESTY + RESILIENCE: a TOTAL ingestion failure (e.g. every
+    // source errored — no Polygon key AND the CBOE fallback failed) must NOT
+    // abort the pipeline. Downstream options analysts read state.optionsData,
+    // so emit a deterministic seeded bundle per ticker (the same parity mock
+    // resolveLiveOptionsBundle degrades to when no key is set). Without this,
+    // optionsData stays undefined and every stage-2/3 analyst throws on
+    // `compute(ticker, undefined)` — which is exactly the "most analysts
+    // didn't run + everything mocked" symptom a user sees when the live
+    // chain can't be fetched. The degraded run is still flagged honestly
+    // via this trace's dataProvenance below, and the ingestion node still
+    // leaves a trace so it appears in the wall (not silently dropped).
+    const profile = profileFromTuning(tuning);
+    const optionsData: Record<string, any> = {};
+    for (const ticker of state.tickers ?? []) {
+      try {
+        optionsData[ticker] = generateMockBundle(ticker, profile);
+      } catch {
+        /* worst-case: leave this ticker absent; downstream will skip gracefully */
+      }
+    }
+    const erroredState: AgentState = {
       ...updatedState,
+      optionsData,
       error: `Options ingestion error: ${errorMessage}`,
       current_step: 'options_ingestion_error',
       messages: [
@@ -299,6 +320,21 @@ export async function optionsIngestionHandler(
         { role: 'error', content: `Failed to ingest option chains: ${errorMessage}`, timestamp: new Date().toISOString() },
       ],
     };
+    return node.captureTrace(erroredState, {
+      analyst: 'options_ingestion',
+      name: 'Options Data Ingestion',
+      stage: 1,
+      instructions: OPTIONS_INSTRUCTIONS.options_ingestion,
+      inputs: [],
+      weighting: [],
+      output: {
+        verdict: 'DEGRADED',
+        summary: `Options ingestion failed to fetch a live chain (${errorMessage}); ran on seeded parity mock for ${state.tickers?.length ?? 0} ticker(s).`,
+        details: { error: errorMessage, tickers: state.tickers, degraded: true },
+      },
+      notes: ['Options ingestion failed to fetch a live chain; ran on seeded parity mock for all tickers.'],
+      dataProvenance: 'seeded-parity',
+    });
   }
 }
 

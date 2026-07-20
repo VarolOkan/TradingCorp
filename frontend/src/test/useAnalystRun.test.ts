@@ -77,17 +77,50 @@ describe('useAnalystRun (event-driven)', () => {
     expect(result.current.state.cells.every((c) => c.phase === 'idle')).toBe(true);
   });
 
-  it('resets when tickers change (new submission)', () => {
+  it('resets when a new run starts (analysis_start), not on ticker prop change', () => {
     const socket = makeFakeSocket();
     const { result, rerender } = renderHook(
-      ({ tickers }) => useAnalystRun(socket as any, tickers),
+      ({ tickers }) => useAnalystRun(socket as any, tickers, { analystIds: ['options_ingestion', 'vol_surface', 'options_risk'] }),
       { initialProps: { tickers: ['AAPL'] } }
     );
-    act(() => socket.emit('analyst_start', { analyst: 'fundamental' }));
-    expect(result.current.state.cells.find((c) => c.analyst === 'fundamental')!.phase).toBe('active');
+    act(() => socket.emit('analyst_start', { analyst: 'vol_surface', tickers: ['AAPL'] }));
+    expect(result.current.state.cells.find((c) => c.analyst === 'vol_surface')!.phase).toBe('active');
 
+    // Changing the tickers prop alone does NOT reset (the server drives reset
+    // via `analysis_start`, which arrives before the analyst stream).
     rerender({ tickers: ['MSFT'] });
+    expect(result.current.state.cells.find((c) => c.analyst === 'vol_surface')!.phase).toBe('active');
+
+    // A fresh run (analysis_start with the new tickers) resets the wall.
+    act(() => socket.emit('analysis_start', { tickers: ['MSFT'] }));
     expect(result.current.state.cells.every((c) => c.phase === 'idle')).toBe(true);
     expect(result.current.state.cells[0].ticker).toBe('MSFT');
+  });
+
+  it('REGRESSION: a whole run streamed before any re-render still lights every panel (no Standing by)', () => {
+    // Reproduces the live symptom: the user clicks Analyze, the server emits
+    // analysis_start + every analyst_start/done almost immediately (a fast,
+    // seeded options run), and React has not yet re-rendered/re-attached
+    // listeners. With listeners attached once and reset driven by
+    // analysis_start (which precedes the analyst stream), every panel must
+    // reach 'done' — NOT stay 'Standing by'.
+    const socket = makeFakeSocket();
+    const ids = ['options_ingestion', 'vol_surface', 'options_pricing', 'options_greeks', 'options_flow', 'options_risk', 'governance'];
+    const { result } = renderHook(() =>
+      useAnalystRun(socket as any, ['TSLA'], { analystIds: ids })
+    );
+
+    act(() => {
+      // The entire run arrives in one synchronous burst (as a fast server can).
+      socket.emit('analysis_start', { tickers: ['TSLA'] });
+      for (const id of ids) {
+        socket.emit('analyst_start', { analyst: id, tickers: ['TSLA'] });
+        socket.emit('analyst_done', { analyst: id, tickers: ['TSLA'], decision: 'APPROVE', confidence: 70 });
+      }
+    });
+
+    expect(result.current.state.completed).toBe(true);
+    expect(result.current.state.running).toBe(false);
+    expect(result.current.state.cells.every((c) => c.phase === 'done')).toBe(true);
   });
 });

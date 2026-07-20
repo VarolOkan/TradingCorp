@@ -90,4 +90,42 @@ describe('Phase D — options agency end-to-end (STOP criterion)', () => {
       expect(traces.filter((x: any) => x.analyst === id).length).toBe(1);
     }
   });
+
+  it('RESILIENCE: a total ingestion failure must NOT abort the pipeline (all analysts run on seeded parity)', async () => {
+    // Reproduces the live symptom: when no live chain can be fetched
+    // (no Polygon key AND the CBOE/Yahoo fallback throws instead of
+    // degrading to mock), options_ingestion throws entirely. Before the
+    // fix its catch returned an error state WITHOUT setting
+    // state.optionsData, so every downstream options analyst received
+    // bundle=undefined and threw too — only the orchestrator "ran"
+    // and the rest of the pipeline aborted. Assert the fix: all 9
+    // analysts still complete, flagged seeded-parity (honest, not live).
+    const mod = await import('../registry/sources/adapters/option-chain');
+    const spy = jest.spyOn(mod, 'resolveLiveOptionsBundle').mockRejectedValue(
+      new Error('network disabled in test environment'),
+    );
+    try {
+      const graph = new AgencyGraph(AGENCIES['options-intraday']!);
+      const result = await graph.execute(makeInitialState(['TSLA']));
+      const traces = (result.analystTraces ?? []) as any[];
+      // Every analyst (incl. all stage-2/3 options analysts) completed.
+      for (const id of optionAnalysts('options-intraday')) {
+        const t = traces.filter((x) => x.analyst === id);
+        expect(t.length).toBe(1);
+        expect(t[0].error).toBeUndefined();
+      }
+      // The degraded run is honestly flagged, never claimed as live.
+      const ing = traces.find((x) => x.analyst === 'options_ingestion');
+      expect(ing.dataProvenance).toBe('seeded-parity');
+      for (const id of optionAnalysts('options-intraday')) {
+        const t = traces.find((x) => x.analyst === id);
+        expect(t.dataProvenance).toBe('seeded-parity'); // ${id} must not claim live
+      }
+      // The pipeline still reaches a decision (not a workflow_error).
+      expect(result.error).toBeNull();
+      expect(['APPROVE', 'REJECT']).toContain(result.final_decision);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

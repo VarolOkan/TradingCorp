@@ -27,6 +27,33 @@ input was dead weight (nothing ever set a non-default id). If session
 switching is added later, restore the `onSessionChange` prop chain and
 re-add the `AnalysisForm` "Session ID" input that was removed here.
 
+## Recently fixed (this session) — options ingestion resilience
+
+**Symptom:** running the `options-intraday` (or `options-swing`) agency with no
+live option chain reachable (no Polygon key AND the CBOE/Yahoo fallback also
+failing) showed *most analysts didn't run* and *most data mocked*.
+
+**Root cause:** `optionsIngestionHandler` (`src/registry/logic/options-handlers.ts`)
+wrapped its fetch in a `try`, but on total failure the `catch` returned an error
+state **without setting `state.optionsData`**. Every downstream options analyst
+(`vol_surface`, `options_pricing`, `options_greeks`, `options_flow`,
+`options_technical`, `options_risk`) reads `state.optionsData[ticker]` via
+`resolveBundle`, so `bundle` came back `undefined` and each `compute(ticker,
+undefined)` threw — cascading into a pipeline-wide abort. The live network path
+(`resolveLiveOptionsBundle`/`acquirePriceBars`/`acquireOptionChain` throwing
+instead of degrading to mock) triggered exactly this.
+
+**Fix:** the `catch` now emits a deterministic seeded `optionsData` bundle per
+ticker (same parity mock as the no-key path) **and** leaves an
+`options_ingestion` trace flagged `seeded-parity`/`DEGRADED`, so the pipeline
+completes on honest mock data instead of aborting. Regression test:
+`RESILIENCE: a total ingestion failure must NOT abort the pipeline`
+(`src/tests/options-agency-e2e.test.ts`).
+
+**Honest behaviour after fix:** with no live chain, the run still completes and
+all analysts report `seeded-parity` (never claimed as `live`). To get real data,
+configure a Polygon key / live option source.
+
 ## 1. Scoring/verdicts remain deterministic (seeded) models
 
 The per-analyst *scoring* verdicts are produced by deterministic handlers that

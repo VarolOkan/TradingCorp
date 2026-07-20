@@ -117,13 +117,24 @@ describe('AnalysisView — agency-first UX', () => {
 // --- Agency-switch guard (unsaved results) ---
 // A fake socket that records handlers so tests can fire server events.
 function recordingSocket() {
-  const handlers: Record<string, (p: any) => void> = {};
+  // Real socket.io allows MULTIPLE listeners per event. Two hooks
+  // (useAnalysis + useAnalystRun) both subscribe to `analysis_start`, so the
+  // mock must fan out to every registered handler — otherwise the second
+  // `on()` clobbers the first and the run-id bump (which remounts the results
+  // panel) never fires.
+  const handlers: Record<string, ((p: any) => void)[]> = {};
   return {
-    on: (ev: string, fn: (p: any) => void) => { handlers[ev] = fn; },
-    off: vi.fn(),
+    on: (ev: string, fn: (p: any) => void) => {
+      (handlers[ev] ||= []).push(fn);
+    },
+    off: (ev: string, fn: (p: any) => void) => {
+      handlers[ev] = (handlers[ev] || []).filter((f) => f !== fn);
+    },
     emit: vi.fn(),
     connected: true,
-    _fire: (ev: string, payload: any) => handlers[ev]?.(payload),
+    _fire: (ev: string, payload: any) => {
+      for (const fn of handlers[ev] || []) fn(payload);
+    },
   };
 }
 

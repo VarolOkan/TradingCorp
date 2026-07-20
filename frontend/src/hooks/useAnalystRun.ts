@@ -76,34 +76,61 @@ export function useAnalystRun(
   // start/done pair, and not again if the effect re-arms).
   const completedRef = useRef(false);
 
-  // Keep the latest tickers in a ref so reset() and the effect don't depend on
-  // the (potentially unstable) tickers array identity — otherwise every render
-  // would produce a new reset() and re-run the effect, causing an infinite loop.
+  // Keep the latest tickers + analyst-id set in refs so the (socket-once)
+  // listeners and reset() always read the CURRENT agency's ids, even though
+  // the effect that attaches them runs only when the socket changes.
   const tickersRef = useRef(tickers);
   tickersRef.current = tickers;
+  // Keep the analyst-id set in a ref. IMPORTANT: leave it as `undefined` (not
+  // `[]`) when the caller passes nothing — IDLE_CELLS treats `undefined` as
+  // "all analysts", whereas `[]` would render zero panels.
+  const analystIdsRef = useRef(analystIds);
+  analystIdsRef.current = analystIds;
 
+  // Reset the wall to idle for the current agency/tickers. Used by the exposed
+  // reset() and by the agency-change effect below.
   const reset = useCallback(() => {
     const currentTickers = tickersRef.current;
+    const ids = analystIdsRef.current;
     startCount.current = 0;
     doneCount.current = 0;
     completedRef.current = false;
     setState({
       running: false,
       tickers: currentTickers,
-      cells: IDLE_CELLS(currentTickers, analystIds),
+      cells: IDLE_CELLS(currentTickers, ids),
+      completed: false,
+    });
+  }, []);
+
+  // Reset the wall to idle for a FRESH run, using the tickers the server just
+  // reported on `analysis_start`. This is what makes the wall track each run:
+  // the server emits `analysis_start` BEFORE any per-analyst events, so
+  // resetting here never races the analyst_start/analyst_done stream.
+  const resetForRun = useCallback((runTickers: string[] | undefined) => {
+    const ids = analystIdsRef.current;
+    const t = runTickers && runTickers.length ? runTickers : tickersRef.current;
+    startCount.current = 0;
+    doneCount.current = 0;
+    completedRef.current = false;
+    setState({
+      running: false,
+      tickers: t,
+      cells: IDLE_CELLS(t, ids),
       completed: false,
     });
   }, []);
 
   // Completed is reached once every analyst that started has also emitted done.
   // We count started vs done (not a fixed ANALYSTS.length) because not every
-  // analyst node streams a done event (e.g. data_ingestion), and a generic
-  // agency may contain any set of analysts.
-  const tickersKey = tickers.join(',');
-  const agencyKey = (analystIds ?? []).join(',');
+  // analyst node streams a done event, and a generic agency may contain any
+  // set of analysts.
   useEffect(() => {
     if (!socket) return;
-    reset();
+
+    const onAnalysisStart = (p: { tickers?: string[] }) => {
+      resetForRun(p?.tickers);
+    };
 
     const onStart = (p: { analyst: string; tickers?: string[] }) => {
       const id = toAnalystId(p.analyst);
@@ -170,18 +197,35 @@ export function useAnalystRun(
       setState((s) => ({ ...s, running: false }));
     };
 
+    socket.on('analysis_start', onAnalysisStart);
     socket.on('analyst_start', onStart);
     socket.on('analyst_done', onDone);
     socket.on('analysis_error', onError);
 
     return () => {
+      socket.off('analysis_start', onAnalysisStart);
       socket.off('analyst_start', onStart);
       socket.off('analyst_done', onDone);
       socket.off('analysis_error', onError);
     };
-    // Re-run (and re-arm) when the socket changes OR the requested tickers
-    // change (new submission). tickersKey is a stable-by-value string.
-  }, [socket, tickersKey, agencyKey, reset]);
+    // Attach listeners ONCE per socket. Do NOT re-arm on wallTickers/agencyId
+    // change: re-attaching mid-run detaches the very listeners the server is
+    // streaming analyst_start/done to, and the reset() that accompanied the
+    // re-arm wiped in-flight cell updates. For a fast (seeded) run the whole
+    // pipeline can complete before React re-attaches, leaving every panel
+    // stuck on "Standing by". Resetting on the server's 'analysis_start'
+    // (which precedes all analyst events) avoids the race entirely.
+  }, [socket, resetForRun]);
+
+  // Rebuild the idle wall when the SELECTED AGENCY changes (so the panel set
+  // matches the new agency) WITHOUT re-attaching the socket listeners. Agency
+  // changes are blocked while a run is in flight (requestAgency guards), so
+  // this never fires mid-run and never races the stream.
+  const agencyKey = (analystIds ?? []).join(',');
+  useEffect(() => {
+    reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agencyKey]);
 
   return { state, reset };
 }
