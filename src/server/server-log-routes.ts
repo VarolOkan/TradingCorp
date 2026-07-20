@@ -3,7 +3,7 @@
 // Lets the frontend Settings dialog show live server traces (LLM calls, etc.).
 import type { Express } from 'express';
 import fs from 'fs';
-import { LOG_FILE_PATH } from '../utils/logger';
+import { getLogFile } from '../utils/logger';
 
 function tailFile(filePath: string, lines: number): string {
   if (!fs.existsSync(filePath)) return '(no log file yet)';
@@ -19,7 +19,7 @@ export function registerServerLogRoutes(app: Express): void {
   app.get('/server-log', (req, res) => {
     try {
       const lines = Math.min(2000, Math.max(1, Number(req.query.lines) || 200));
-      const content = tailFile(LOG_FILE_PATH, lines);
+      const content = tailFile(getLogFile(), lines);
       res.type('text/plain').send(content);
     } catch (e) {
       res.status(500).type('text/plain').send(`(error reading log: ${(e as Error).message})`);

@@ -5,6 +5,11 @@
 import {
   bsPrice,
   bsGreeks,
+  binomialAmerican,
+  americanGreeks,
+  deriveGreeks,
+  getOptionStyle,
+  __setOptionStyle,
   normCdf,
   normPdf,
   yearsToExpiry,
@@ -144,5 +149,84 @@ describe('greeks — yearsToExpiry / resolveRfr', () => {
     expect(resolveRfr(null)).toBe(DEFAULT_RFR);
     expect(resolveRfr(NaN)).toBe(DEFAULT_RFR);
     expect(resolveRfr(-1)).toBe(DEFAULT_RFR);
+  });
+});
+
+describe('greeks — binomialAmerican (CRR) + American greeks', () => {
+  // American exercise is the correct model for US-listed equity options; the
+  // closed-form BS engine is the European reference kept for convergence tests
+  // and is selectable via TC_OPTION_STYLE=european (no UI toggle).
+
+  it('converges to the BS European price as tree steps increase', () => {
+    const S = 100, K = 100, T = 1, r = 0.05, sigma = 0.2, q = 0;
+    const eu = bsPrice('C', S, K, T, r, sigma, q);
+    const a200 = binomialAmerican('C', S, K, T, r, sigma, q, 200).price;
+    const a2000 = binomialAmerican('C', S, K, T, r, sigma, q, 2000).price;
+    expect(a2000).toBeCloseTo(eu, 2);
+    expect(Math.abs(a2000 - eu)).toBeLessThan(Math.abs(a200 - eu));
+  });
+
+  it('American put on a dividend name is worth MORE than the European (BS) put', () => {
+    const S = 100, K = 130, T = 0.1, r = 0.04, sigma = 0.25, q = 0.03;
+    const euPut = bsPrice('P', S, K, T, r, sigma, q);
+    const am = binomialAmerican('P', S, K, T, r, sigma, q, 400);
+    expect(am.price).toBeGreaterThan(euPut);
+    expect(am.earlyExercise).toBe(true);
+  });
+
+  it('without dividends, American call price == European call price (no early-exercise premium)', () => {
+    const S = 100, K = 100, T = 0.5, r = 0.05, sigma = 0.3;
+    const eu = bsPrice('C', S, K, T, r, sigma, 0);
+    const am = binomialAmerican('C', S, K, T, r, sigma, 0, 2000);
+    expect(am.price).toBeCloseTo(eu, 2);
+    expect(am.earlyExercise).toBe(false);
+  });
+
+  it('American greeks match BS greeks (European reference) within finite-diff tolerance', () => {
+    const S = 100, K = 100, T = 1, r = 0.05, sigma = 0.2;
+    const bs = bsGreeks('C', S, K, T, r, sigma);
+    const am = americanGreeks('C', S, K, T, r, sigma, 0, 400);
+    expect(am.delta).toBeCloseTo(bs.delta, 2);
+    expect(am.gamma).toBeCloseTo(bs.gamma, 3);
+    expect(am.vega).toBeCloseTo(bs.vega, 1);
+    expect(am.theta).toBeCloseTo(bs.theta, 1);
+    expect(am.rho).toBeCloseTo(bs.rho, 1);
+  });
+
+  it('degenerate T=0 / sigma=0 return well-formed finite greeks (no NaN)', () => {
+    const g = americanGreeks('C', 120, 100, 0, 0.05, 0.2);
+    expect(Number.isFinite(g.delta)).toBe(true);
+    expect(g.delta).toBe(1);
+    expect(g.gamma).toBe(0);
+    const p = binomialAmerican('P', 80, 100, 0, 0.05, 0.2);
+    expect(p.price).toBeCloseTo(20, 6);
+  });
+});
+
+describe('greeks — deriveGreeks dispatch (TC_OPTION_STYLE)', () => {
+  const prev = process.env.TC_OPTION_STYLE;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.TC_OPTION_STYLE;
+    else process.env.TC_OPTION_STYLE = prev;
+    __setOptionStyle(null);
+  });
+
+  it('defaults to American binomial', () => {
+    delete process.env.TC_OPTION_STYLE;
+    __setOptionStyle(null);
+    expect(getOptionStyle()).toBe('american');
+    const g = deriveGreeks('C', 100, 100, 1, 0.05, 0.2);
+    expect(g.delta).toBeGreaterThan(0.5);
+    expect(g.delta).toBeLessThan(1);
+  });
+
+  it('TC_OPTION_STYLE=european reverts to the closed-form BS engine', () => {
+    process.env.TC_OPTION_STYLE = 'european';
+    __setOptionStyle(null);
+    expect(getOptionStyle()).toBe('european');
+    const am = deriveGreeks('C', 100, 100, 1, 0.05, 0.2);
+    const eu = bsGreeks('C', 100, 100, 1, 0.05, 0.2);
+    expect(am.delta).toBeCloseTo(eu.delta, 8);
+    expect(am.vega).toBeCloseTo(eu.vega, 8);
   });
 });

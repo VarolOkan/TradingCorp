@@ -189,7 +189,7 @@ handler for `fn` analysts, or `declarativeHandler` for `declarative` analysts.
 | Governance Gatekeeper | `registry/logic/governance.ts` | Stage 4: extracts the Bull/Bear debate, runs the Risky/Safe debate, then the final APPROVE/REJECT decision with a preservation-first veto. | Stage 4 (Trading Decision) |
 | Options Ingestion | `registry/logic/options-handlers.ts` | Stage 1: builds a deterministic `HistoricalBundle` (OHLCV + expiries + per-expiry option quotes + underlying + rfr) and stashes it on `state.optionsData[ticker]`. | Options Stage 1 |
 | Volatility Surface | `registry/logic/vol-surface.ts` | Builds a `VolSurface` (term + skew) from the bundle; emits `call_iv`/`put_iv` channels. | Options Stage 2 |
-| Options Pricing | `registry/logic/options-handlers.ts` | Black–Scholes fair value vs market; flags `EDGE`/`THIN_EDGE`/`NO_EDGE`. | Options Stage 2 |
+| Options Pricing | `registry/logic/options-handlers.ts` | Binomial (American) fair value vs market; flags `EDGE`/`THIN_EDGE`/`NO_EDGE`. | Options Stage 2 |
 | Options Greeks | `registry/logic/greeks.ts` | Computes the option Greeks (delta/gamma/vega/theta/rho) from the surface. | Options Stage 2 |
 | Options Flow | `registry/logic/options-handlers.ts` (declarative) | Option order-flow / OI read — declarative (no fn handler). | Options Stage 2 |
 | Options Technical | `registry/logic/options-handlers.ts` (declarative) | Options-timing technical overlay — declarative (intraday agency only). | Options Stage 2 |
@@ -368,14 +368,16 @@ The options agencies (see `docs/EXTENDING_ANALYSTS.md §8` and the design in `do
   `HistoricalBundle`: daily OHLCV, a set of expiries, and per-expiry option
   quotes (strike / right / bid / ask / IV / greeks / oi / volume). When a live
   chain is available it carries **real** quotes (Massive/CBOE) and feed-provided
-  greeks (CBOE supplies Δ/Γ/ν/Θ/ρ directly; BS `computeGreeks` is the fallback
-  for derived fields and for seeded builds). The `makeRng` wrapper normalizes
+  greeks (CBOE supplies Δ/Γ/ν/Θ/ρ directly; `deriveGreeks` — American binomial by
+  default, `TC_OPTION_STYLE=european` reverts to Black–Scholes — fills derived
+  fields and seeded builds). The `makeRng` wrapper normalizes
   `seededRandom` into `[0,1)` so the seeded fallback's every draw is positive.
   This is the single source of truth for every options analyst.
 - **`vol-surface.ts`** — `buildVolSurface(bundle)` → `VolSurface` (term +
   moneyness skew), also emitted as `call_iv`/`put_iv` channels.
-- **`greeks.ts`** — Black–Scholes `computeGreeks` (delta/gamma/vega/theta/rho)
-  used by pricing + the greeks analyst.
+- **`greeks.ts`** — binomial `deriveGreeks` / `americanGreeks` (delta/gamma/vega/theta/rho,
+  American CRR by default; `TC_OPTION_STYLE=european` reverts to the closed-form
+  Black–Scholes `bsGreeks`/`bsPrice`) used by pricing + the greeks analyst.
 - **`options-shared.ts`** — `runFnOptionsAnalyst(cfg, …)` runs a fn options
   analyst: resolves each ticker's `HistoricalBundle` (preferring the one
   `options_ingestion` stashed on `state.optionsData`), emits one trace + one
@@ -466,9 +468,9 @@ independent provider/baseUrl/model/token slot (so a user can point
   `runAnalystLLM({ role: def.modelRole })` which resolves the
   provider/baseUrl/model/token from the `LlmConfigStore` by role. No token →
   deterministic fallback (parity preserved).
-- **Frontend**: `SettingsDialog` is now tabbed — *Connection* (backend URI) and
-  *LLM Models* (three role rows + per-agency default dropdown). Tokens render as
-  password inputs and as `configured`/`not configured` chips only.
+- **Frontend**: `SettingsDialog` is now tabbed — *General* (backend URI + page
+  width) and *LLM Models* (three role rows + per-agency default dropdown). Tokens
+  render as password inputs and as `configured`/`not configured` chips only.
 
 ## Report export & viewer
 

@@ -10,6 +10,14 @@ import { makeNodeSurface } from './shared';
 import type { AnalystTuning } from '../../types/registry';
 import type { AgentState, HistoricalBundle } from '../../types/financial-analysis';
 
+// The jest runtime has a native globalThis.fetch (node 22 undici). Without a
+// key/transport the handlers fall back to the seeded mock bundle — but only if
+// the free CBOE/Yahoo feeds are treated as unreachable. Stubbing fetch to
+// undefined forces that deterministic mock path and prevents the suite from
+// hanging on blocked outbound network (the same guard hist.test.ts uses).
+const _prevFetch = (globalThis as any).fetch;
+(globalThis as any).fetch = undefined;
+
 type AnyTrace = Record<string, any>;
 
 function baseState(tickers: string[]): AgentState {
@@ -23,7 +31,22 @@ function baseState(tickers: string[]): AgentState {
 
 const surface = makeNodeSurface();
 
+// Deterministic, replayable bundle: ingest AAPL's mock bundle once and reuse a
+// deep clone for each fn-analyst test (the Greeks math is ~0.5s per 294-contract
+// build — re-ingesting on every test makes the suite cross your 5–10s budget).
+// The ingestion tests below exercise the real handler path directly.
+async function ingestAAPL(): Promise<AgentState> {
+  return optionsIngestionHandler(baseState(['AAPL']), surface);
+}
+function cloneIngested(src: AgentState): AgentState {
+  return JSON.parse(JSON.stringify(src)) as AgentState;
+}
+
 describe('Phase B — options handlers', () => {
+  // Guard: if the live-feed fallback ever reaches the network again (e.g. the
+  // fetch stub drifts), fail fast instead of hanging the suite.
+  jest.setTimeout(30000);
+
   describe('options_ingestion', () => {
     it('loads state.optionsData for every ticker and emits a quality message', async () => {
       const out = await optionsIngestionHandler(baseState(['AAPL']), surface);
@@ -52,10 +75,13 @@ describe('Phase B — options handlers', () => {
   });
 
   describe('fn options analysts', () => {
+    let ingested: AgentState;
+    beforeAll(async () => {
+      ingested = await ingestAAPL();
+    });
     async function runWithData(handler: (s: AgentState, n: any, t?: AnalystTuning) => Promise<AgentState>,
       tuning?: AnalystTuning) {
-      const ingested = await optionsIngestionHandler(baseState(['AAPL']), surface);
-      return handler(ingested, surface, tuning);
+      return handler(cloneIngested(ingested), surface, tuning);
     }
 
     it('vol_surface emits a trace + message + thesis note, score in range', async () => {

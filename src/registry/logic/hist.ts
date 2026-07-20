@@ -28,7 +28,7 @@ import type {
   OptionRight,
 } from '../../types/financial-analysis';
 import { stringToSeed, seededRandom } from './shared';
-import { bsPrice, bsGreeks, yearsToExpiry, resolveRfr, DEFAULT_RFR } from './greeks';
+import { bsPrice, bsGreeks, deriveGreeks, yearsToExpiry, resolveRfr, DEFAULT_RFR } from './greeks';
 import { logger } from '../../utils/logger';
 
 // P4: the price-bars + option-chain fetchers moved to adapters/{price-bars,option-chain}.ts.
@@ -228,7 +228,7 @@ function seededIv(rng: () => number, moneyness: number, baseIv: number): number 
 /**
  * Generate the mock historical bundle for one ticker + profile. Deterministic:
  * same (ticker, profile) → byte-identical output. Greeks are BS-derived from
- * the mock chain so they stay internally consistent (BS(mid) ≈ mid).
+ * the mock chain so they stay internally consistent (American binomial price(mid)≈mid).
  */
 export function generateMockBundle(ticker: string, profile: HistProfile = {}): HistoricalBundle {
   const asOf = new Date(profile.asOf ?? MOCK_ASOF);
@@ -301,7 +301,7 @@ export function generateMockBundle(ticker: string, profile: HistProfile = {}): H
           underlying_price: spot,
           underlying_ts: asOf.toISOString(),
         });
-        const g = bsGreeks(type, spot, strike, ttm, rfr, iv);
+        const g = deriveGreeks(type, spot, strike, ttm, rfr, iv, 0, 30);
         greeks.push({
           expiry,
           strike,
@@ -382,7 +382,8 @@ export async function fetchHistoricalBundle(
  *   available, OR the source is unreachable/blocked, we fall back to the
  *   deterministic seeded mock chain from `generateMockBundle` — so the options
  *   agencies always get structurally-valid data (parity: no key = mock).
- * - Greeks are NOT trusted from the feed; we re-derive them with `bsGreeks`
+ * - Greeks are NOT trusted from the feed; we re-derive them with `deriveGreeks`
+ *   (American binomial by default; `TC_OPTION_STYLE=european` reverts to BS)
  *   from the contract's IV + the live underlying price, so the greeks row is
  *   consistent with the project's pricing model regardless of source.
  *
@@ -714,7 +715,11 @@ export function chainToGreeksRows(
   const rows: GreeksRow[] = [];
   for (const q of quotes) {
     const ttm = yearsToExpiry(`${q.expiry}T00:00:00.000Z`, new Date());
-    const g = bsGreeks(q.type, spot, q.strike, ttm, rfr, q.iv);
+    // American binomial by default (US-listed equity options); TC_OPTION_STYLE
+    // can revert to the closed-form BS European engine. Uses a lighter tree
+    // depth (60) since this runs per-contract across the whole chain — delta/
+    // gamma stay within ~3e-4 of BS, and a full chain stays sub-second.
+    const g = deriveGreeks(q.type, spot, q.strike, ttm, rfr, q.iv, 0, 30);
     rows.push({
       expiry: q.expiry,
       strike: q.strike,

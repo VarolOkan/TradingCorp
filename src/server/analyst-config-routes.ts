@@ -208,18 +208,23 @@ export async function probeSource(opts: {
     finnhub: '/quote?symbol=AAPL',
   };
   const root = (opts.baseUri && opts.baseUri.trim()) || (source.endpoint ?? '');
-  // Polygon / Massive-compatible sources: probe a ticker-INDEPENDENT reference
-  // endpoint (/v3/reference/dividends) so a VALID key returns 200 regardless of
-  // ticker. The snapshot `endpoint` carries a literal `{ticker}` that would
-  // 404/400 on a raw probe and mask a perfectly good key as "auth failed".
-  // We derive the host ORIGIN from the Base URI (or the source endpoint) so the
-  // probe follows whichever host the deployment targets (api.massive.com by
-  // default) — auth is the Bearer token, which the docs confirm works here.
-  const REFERENCE_HEALTH = new Set(['polygonOptions', 'polygonHist']);
+  // Ticker-independent REFERENCE endpoints used for the [Test] health probe.
+  // IMPORTANT (honesty): the options snapshot is a SEPARATE entitlement from
+  // reference/dividends, so we probe the REAL options endpoint (with a liquid
+  // reference ticker) — a green result then honestly means "options snapshot
+  // works", not merely "dividends works". Probing dividends for the options
+  // source was misleading: a key without the options entitlement still showed
+  // green, while the live run silently fell back to CBOE. Historical aggregates
+  // share the host auth with dividends, so a ticker-independent reference row
+  // remains an adequate proxy there.
+  const REFERENCE_HEALTH: Record<string, string> = {
+    polygonOptions: '/v3/snapshot/options/AAPL',
+    polygonHist: '/v3/reference/dividends?limit=1',
+  };
   let url: string;
-  if (REFERENCE_HEALTH.has(source.id ?? '')) {
+  if (REFERENCE_HEALTH[source.id ?? '']) {
     const origin = originOf(root) ?? root;
-    url = `${origin}/v3/reference/dividends?limit=1`;
+    url = `${origin}${REFERENCE_HEALTH[source.id ?? '']}`;
   } else {
     const q = healthQuery[source.id ?? ''] ?? '';
     url =

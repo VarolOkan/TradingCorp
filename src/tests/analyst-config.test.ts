@@ -215,7 +215,7 @@ describe('POST /analyst-config (B1 per-source credentials)', () => {
     }
   });
 
-  it('probes polygonOptions with a ticker-INDEPENDENT reference endpoint on the stored host + Bearer auth', async () => {
+  it('probes polygonOptions with the REAL options snapshot endpoint (honest entitlement check)', async () => {
     // Save a Polygon key under the options_ingestion analyst (where the engine
     // resolves it). Use the default Massive host.
     await request(app)
@@ -236,10 +236,12 @@ describe('POST /analyst-config (B1 per-source credentials)', () => {
         .send({ analystId: 'options_ingestion', sourceId: 'polygonOptions', sessionId: 'test-poly' });
       expect(res.status).toBe(200);
       expect(res.body.ok).toBe(true);
-      // The probe must NOT carry a literal {ticker}, must hit the reference
-      // dividends endpoint, and must target the stored host (api.massive.com).
+      // The probe must NOT carry a literal {ticker}, must hit the REAL options
+      // snapshot endpoint (not dividends), and must target the stored host
+      // (api.massive.com) with Bearer auth. A green result now honestly means
+      // the options entitlement works — not just dividends.
       expect(capturedUrl).not.toMatch(/\{ticker\}/);
-      expect(capturedUrl).toMatch(/api\.massive\.com\/v3\/reference\/dividends/);
+      expect(capturedUrl).toMatch(/api\.massive\.com\/v3\/snapshot\/options\/AAPL/);
       expect(capturedAuth).toBe('Bearer poly-live');
     } finally {
       (globalThis as any).fetch = realFetch;

@@ -57,13 +57,21 @@ no compiled JS `main`. **Mitigated:** `npm run server` runs
 
 ## 4. Options agencies — known limitations
 
-- **Black–Scholes assumptions.** Pricing/greeks use a textbook Black–Scholes model
-  (`src/registry/logic/greeks.ts`) with **constant volatility** (per-expiry IV from
-  the bundle), no dividend, no early-exercise/American feature. The per-strike IVs
-  come from the REAL acquired chain when live (CBOE/Polygon/Massive), and the
-  vol-surface `iv_history` is **market-calibrated** from the real per-tenor ATM IVs
-  (`ivHistorySource: 'real-chain'`). When no live chain is present the IV history is
-  seeded and the vol-surface analyst reports `seeded-parity` with a description.
+- **Option pricing model — American binomial (default).** Per-strike greeks are
+  derived by a **Cox–Ross–Rubinstein binomial tree** (`src/registry/logic/greeks.ts`,
+  `binomialAmerican` / `americanGreeks`) using the per-expiry IV from the bundle as
+  a **constant per-contract volatility**, with continuous dividend yield `q`. The
+  model prices **American** exercise (early-exercise allowed), which is correct for
+  US-listed single-stock options. A closed-form Black–Scholes engine remains as the
+  European reference and is selectable by experts via `TC_OPTION_STYLE=european`
+  (no UI toggle). Known limits: constant σ per contract (no stochastic/local vol, so
+  far-from-ATM / earnings-smile greeks are approximate), and American exercise is
+  irrelevant for European-index options (SPX) — switch `TC_OPTION_STYLE=european`
+  for those if needed. The per-strike IVs come from the REAL acquired chain when
+  live (CBOE/Polygon/Massive), and the vol-surface `iv_history` is
+  **market-calibrated** from the real per-tenor ATM IVs (`ivHistorySource:
+  'real-chain'`). When no live chain is present the IV history is seeded and the
+  vol-surface analyst reports `seeded-parity` with a description.
 - **`options_risk` / governance veto are mock-gated.** The governance options veto
   acts on `iv_percentile`, `max_loss`, `risk_level` emitted by the `options_risk`
   handler. Those signals are synthetic (seeded), so the veto is a faithful
@@ -82,10 +90,18 @@ no compiled JS `main`. **Mitigated:** `npm run server` runs
 
 The options path targets **Massive/Polygon** (`api.massive.com`, Bearer) when a key
 is configured; without a key it uses the free **CBOE** delayed feed automatically.
-The Settings `[Test]` probe checks `/v3/reference/dividends` (ticker-independent,
-Bearer) — a passing probe means the *dividends* entitlement works, **not** the
-options snapshot (a separate entitlement). A 401 there is the known Massive
-options-entitlement gap → CBOE fallback.
+
+- **The `[Test]` probe is now honest.** It probes the REAL options snapshot
+  endpoint `/v3/snapshot/options/AAPL` (with a liquid reference ticker) on the
+  stored host with the Bearer token. A **green** result now means the *options
+  snapshot* entitlement actually works — not (as before) merely the *dividends*
+  entitlement. A **401** there is the known Massive options-entitlement gap → the
+  live run falls back to CBOE (real delayed bid/ask/IV + greeks), and the data
+  badge honestly reflects `DELAYED`/fallback rather than a false `LIVE`.
+- **Pricing is American by default.** Per-strike greeks use a CRR binomial tree
+  (American exercise) rather than European Black–Scholes, so puts on dividend
+  names are priced correctly. `TC_OPTION_STYLE=european` reverts to BS for
+  European-index underlyings (see §4).
 
 ## 6. Query parser can misclassify English-word tickers
 

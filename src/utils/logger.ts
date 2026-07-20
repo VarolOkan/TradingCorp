@@ -18,13 +18,29 @@ export const LogLevel = {
 };
 
 // Resolve the log file path. Default: ./logs/server.log next to cwd.
-const LOG_FILE = process.env.LOG_FILE || path.join(process.cwd(), 'logs', 'server.log');
+let LOG_FILE = process.env.LOG_FILE || path.join(process.cwd(), 'logs', 'server.log');
+/**
+ * Override the resolved log file path at runtime. Used by tests to point the
+ * logger at an isolated temp file without re-importing modules under
+ * jest.isolateModules (which segfaults under the parallel worker pool). The
+ * shared logger instance also redirects here so file output stays consistent.
+ */
+export function setLogFile(p: string): void {
+  LOG_FILE = p;
+  // Re-open the write stream against the new path.
+  if (logFh) { try { logFh.end(); } catch { /* ignore */ } logFh = null; }
+}
 let logFh: fs.WriteStream | null = null;
-try {
-  fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
-  logFh = fs.createWriteStream(LOG_FILE, { flags: 'a' });
-} catch {
-  logFh = null; // file logging best-effort; console still works
+function ensureLogFh(): fs.WriteStream | null {
+  if (logFh === null) {
+    try {
+      fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+      logFh = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+    } catch {
+      logFh = null; // file logging best-effort; console still works
+    }
+  }
+  return logFh;
 }
 
 /**
@@ -55,8 +71,9 @@ export class Logger {
 
   /** Append a line to the log file (always, including DEBUG). */
   private toFile(line: string): void {
-    if (logFh) {
-      try { logFh.write(line + '\n'); } catch { /* ignore */ }
+    const fh = ensureLogFh();
+    if (fh) {
+      try { fh.write(line + '\n'); } catch { /* ignore */ }
     }
   }
 
@@ -112,4 +129,9 @@ function safeMeta(meta: any[]): string {
 
 // Export a default logger instance
 export const logger = new Logger();
+/** Current resolved log file path (mutable via setLogFile). */
 export const LOG_FILE_PATH = LOG_FILE;
+/** Read the current resolved log file path (reflects setLogFile changes). */
+export function getLogFile(): string {
+  return LOG_FILE;
+}

@@ -32,7 +32,7 @@ import {
   parseTreasuryRfr,
 } from './hist';
 import type { AnalystAcquisition } from '../sources';
-import { DEFAULT_RFR, yearsToExpiry, bsGreeks } from './greeks';
+import { DEFAULT_RFR, yearsToExpiry, deriveGreeks } from './greeks';
 
 /**
  * Extract an annualized risk-free rate (0..1) from a Treasury avg_interest_rates
@@ -85,10 +85,14 @@ async function resolveEngineBundle(
     }
   }
 
-  // Greeks are re-derived with the (possibly live) rfr so they stay consistent.
+  // Greeks are re-derived with the (possibly live) rfr so they stay consistent
+  // (American binomial by default; TC_OPTION_STYLE can revert to BS European).
+  // Lighter tree depth (30) — this runs per-contract across the whole chain.
+  // American binomial by default (US-listed equity options); TC_OPTION_STYLE
+  // can revert to the closed-form BS European engine.
   const greeks = option_chain.map((q: any) => {
     const ttm = yearsToExpiry(`${q.expiry}T00:00:00.000Z`, new Date());
-    const g = bsGreeks(q.type, underlying_price, q.strike, ttm, rfr, q.iv);
+    const g = deriveGreeks(q.type, underlying_price, q.strike, ttm, rfr, q.iv, 0, 30);
     return {
       expiry: q.expiry,
       strike: q.strike,
@@ -266,7 +270,7 @@ export async function optionsIngestionHandler(
       inputs,
       weighting: [
         { label: 'Chain completeness', inputs: ['chain_rows'], weight: 0.6, rationale: 'Strikes must span ±10 around spot across the requested expiries.', contribution: 60, scale: '0..100 quality weight' },
-        { label: 'Greeks consistency', inputs: ['greeks_rows'], weight: 0.4, rationale: 'Every strike carries BS-derived greeks so BS(mid)≈mid.', contribution: 40, scale: '0..100 quality weight' },
+        { label: 'Greeks consistency', inputs: ['greeks_rows'], weight: 0.4, rationale: 'Every strike carries re-derived greeks (American binomial by default) so price(mid)≈mid.', contribution: 40, scale: '0..100 quality weight' },
       ],
       output: {
         verdict: 'INGESTED',
@@ -276,7 +280,7 @@ export async function optionsIngestionHandler(
       notes:
         anyLive
           ? ['Live Polygon option chain + Yahoo price bars wired into ingestion.']
-          : ['Mock chain + BS greeks — set POLYGON_API_KEY to wire live Polygon data.'],
+          : ['Mock chain + re-derived greeks (American binomial by default) — set POLYGON_API_KEY to wire live Polygon data.'],
       dataProvenance: anyLive ? 'live' : 'seeded-parity',
     });
 
@@ -343,7 +347,7 @@ export async function optionsPricingHandler(state: AgentState, node: NodeSurface
     id: 'options_pricing', name: 'Options Pricing Analyst', stage: 2,
     instructions: OPTIONS_INSTRUCTIONS.options_pricing,
     channels: ['options_pricing_analysis'], thesisLabel: 'OPTIONS PRICING',
-    inputLabel: 'Fair value vs market', sources: ['Option chain (bid/ask/last/IV)', 'BS greeks'],
+    inputLabel: 'Fair value vs market', sources: ['Option chain (bid/ask/last/IV)', 're-derived greeks'],
     weighting: [
       { label: 'Edge size', inputs: ['edge_pct'], weight: 0.6, rationale: 'Larger fair-value gap = more edge.', contribution: 60, scale: '0..100' },
       { label: 'Liquidity', inputs: ['open_interest'], weight: 0.4, rationale: 'Tight spread + OI make the edge tradable.', contribution: 40, scale: '0..100' },

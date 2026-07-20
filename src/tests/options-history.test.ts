@@ -5,6 +5,15 @@ import { acquireOptionChain } from '../registry/sources/adapters/option-chain';
 import express from 'express';
 import request from 'supertest';
 
+// The jest runtime has a native globalThis.fetch (node 22 undici). The two
+// "mock fallback" tests below pass NO fetchFn, so the route would otherwise hit
+// the live CBOE/Yahoo endpoints and hang on blocked outbound network. Stubbing
+// fetch to undefined forces the deterministic seeded-mock path (same guard as
+// hist.test.ts / options-handlers.test.ts). The vault-key test below sets and
+// restores its own global fetch, so it is unaffected.
+const _prevFetch = (globalThis as any).fetch;
+(globalThis as any).fetch = undefined;
+
 function makeApp(fetchFn: any) {
   const app = express();
   app.use(express.json());
