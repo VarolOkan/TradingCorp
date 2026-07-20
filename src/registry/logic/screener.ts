@@ -351,8 +351,9 @@ async function mapPool<T, R>(items: T[], worker: (item: T) => Promise<R>, concur
  */
 // Agencies that make decisions on intraday horizons screen on short, granular
 // bars; everyone else uses daily bars over a longer lookback. This is the
-// SINGLE source of truth for the screener's horizon — the frontend mirror
-// (agencies.ts) encodes the same rule so the request it sends matches.
+// SINGLE source of truth for the screener's horizon — the frontend registry
+// (generated agencies.ts, hydrated by applyRegistryAgencies) encodes the same
+// rule so the request it sends matches.
 const INTRADAY_SCREENER_AGENCIES: string[] = ['intraday', 'options-intraday'];
 
 export interface ScreenerProfile {

@@ -139,14 +139,17 @@ logic that the declarative engine runs.
   },
 ```
 
-### Step 3 — Mirror on the frontend (so the wall renders the card)
+### Step 3 — Generate the frontend mirror (no manual edit)
 
-In `frontend/src/components/analysts/agencies.ts` add `'contrarian'` to the
-`long-term` agency's `analysts` array (same position as the backend). Add an
-`AnalystMeta` entry (id/name/role/accent/monogram/stage/tasks) in
-`frontend/src/components/analysts/analysts.ts`. **Keep the frontend agency
-mirror and the backend `AGENCIES` array in lockstep** — they are edited by hand
-and drift easily (a test, `agency-mirror.test.ts`, fails if they disagree).
+The frontend analyst/agency catalog is **generated**, not hand-duplicated. After
+editing the backend `ANALYST_DEFS` / `AGENCIES`, run `npm run gen:registry`
+(also runs automatically on `npm run dev` / `npm run build`). It projects the
+backend `src/registry/{analysts,agencies}.ts` into
+`frontend/src/components/analysts/{analysts,agencies}.generated.ts`. Adding a
+backend analyst/agency therefore requires **zero** frontend edits — the
+`AnalystMeta` (id/name/role/accent/monogram/stage/tasks) and agency membership
+are derived automatically. `agency-mirror.test.ts` (vitest) still guards against
+generator drift by comparing the generated files to the backend.
 
 ### Step 4 — Bump the registry test counts (`src/tests/registry.test.ts`)
 
@@ -317,9 +320,12 @@ Stage 3 or 4 — you make the governance node read your channel.
 3. **ONE trace per analyst.** Declarative or fn, your analyst must append exactly
    ONE `AnalystTrace` to `state.analystTraces` (inputs array spans all tickers).
    Pushing a trace per ticker breaks trace-count assertions.
-4. **Frontend/backend mirror drift.** The frontend `analysts.ts` and
-   `agencies.ts` mirrors MUST match the backend. A test (`agency-mirror.test.ts`)
-   fails on drift. Keep them in lockstep every time you touch a registry.
+4. **No manual frontend mirror.** The frontend `analysts.ts` / `agencies.ts`
+   catalogs are generated from the backend by `npm run gen:registry` (wired into
+   `prebuild`/`predev`). Add the analyst to the backend `ANALYST_DEFS` +
+   `AGENCIES` and the frontend updates automatically — do NOT hand-edit the
+   frontend lists. `agency-mirror.test.ts` fails if the generator output drifts
+   from the backend.
 5. **Don't add a 2nd Stage-3 node.** Governance is the single decision node. To
    make a Stage-2 analyst influence the call, have governance READ its channel.
 
@@ -396,12 +402,15 @@ If you add a brand-new agency, add a whole `AGENCIES` entry and bump the
 agency integrity). Bump them and add the new id to the expected-id array. Run
 `npx jest --silent` → green before touching the frontend.
 
-### 4–5. Frontend: mirror metadata + agency
-Edit `frontend/src/components/analysts/analysts.ts` (add to `AnalystId` union +
-`AnalystMeta`) and `agencies.ts` (append to the agency's `analysts` array, same
-position as backend). The `analysts.test.ts` "defines the N pipeline analysts in
-order" assertion must match the `ANALYSTS` array. Keep the frontend agency
-mirrors and the backend `AGENCIES` in lockstep.
+### 4–5. Frontend: regenerate the mirror (no hand-editing)
+
+The frontend catalog is generated from the backend — do NOT edit
+`frontend/src/components/analysts/analysts.ts` / `agencies.ts` by hand (they now
+re-export the generated `*.generated.ts` modules). After the backend edits above,
+run `npm run gen:registry` (automatic on `npm run dev`/`build`). It derives the
+`AnalystId` union, `AnalystMeta` entries, and agency `analysts` arrays from the
+backend `ANALYST_DEFS` / `AGENCIES`. Keep `agency-mirror.test.ts` green — it
+compares the generated output to the backend and fails on drift.
 
 ### 6. Verify
 - Backend: `npx jest --silent` → green.
@@ -476,9 +485,9 @@ strictness.
    `src/registry/agencies.ts` (in pipeline order).
 3. Bump `src/tests/registry.test.ts`: the "exactly 6 agencies" assertion, the
    options agency membership/params assertions, and the analyst-id array.
-4. Mirror on the frontend: add the id to the `AnalystId` union + `AnalystMeta`
-   in `frontend/src/components/analysts/analysts.ts`, and to the relevant
-   agency's `analysts` array in `frontend/src/components/analysts/agencies.ts`.
+4. Regenerate the frontend mirror: the `AnalystId` union + `AnalystMeta` and the
+   agency `analysts` arrays are generated from the backend by `npm run gen:registry`
+   (automatic on `dev`/`build`) — do NOT hand-edit `frontend/src/components/analysts/*.ts`.
    Keep `frontend/src/test/agency-mirror.test.ts` green.
 5. Verify: `npx jest --silent` (backend), `npm run test:ui` (frontend),
    `npx vite build`. Optional live check: `request_analysis` with
@@ -508,8 +517,8 @@ strictness.
 - [ ] Added to the right agency in `src/registry/agencies.ts`
 - [ ] `src/tests/registry.test.ts` count assertions bumped (analyst count,
       expected-id array, agency integrity) — `npx jest` green
-- [ ] Frontend `AnalystId` union + `AnalystMeta` in `analysts.ts`
-- [ ] Frontend agency mirror `agencies.ts` updated to match backend agency
+- [ ] `npm run gen:registry` run (auto on `dev`/`build`) — frontend mirror regenerated
+      from backend; `frontend/src/test/agency-mirror.test.ts` green (no hand frontend edit)
 - [ ] Frontend test added/adjusted (wall panel count + new card present)
 - [ ] `npm run test:ui` green, `npx vite build` green
 - [ ] (Optional) live `GRAPH_MODE=agency` socket check shows the new trace

@@ -149,15 +149,33 @@ describe('SettingsDialog LLM Models tab', () => {
     vi.spyOn(llmConfigClient, 'postLlmConfig').mockResolvedValue(SEED);
   });
 
-  it('Connection tab is the default; switching to LLM Models loads the 3 role rows', async () => {
-    render(<SettingsDialog open onClose={onClose} agencyId="ag-equities" />);
-    expect(screen.getByLabelText('Backend URI')).toBeInTheDocument();
+  it('changing the page max-width persists it and calls the live callback', async () => {
+    const onPageMaxWidthChange = vi.fn();
+    window.localStorage.removeItem('tc:pageMaxWidth');
+    render(
+      <SettingsDialog open onClose={onClose} agencyId="ag-equities" onPageMaxWidthChange={onPageMaxWidthChange} />,
+    );
+    // Default value is 960 when nothing is persisted.
+    const input = screen.getByTestId('page-max-width') as HTMLInputElement;
+    expect(input.value).toBe('960');
 
-    fireEvent.click(screen.getByTestId('tab-llm'));
-    expect(await screen.findByTestId('llm-role-deep-thought')).toBeInTheDocument();
-    expect(screen.getByTestId('llm-role-scanner')).toBeInTheDocument();
-    expect(screen.getByTestId('llm-role-flexible')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '1400' } });
+    // Persisted to localStorage + live callback fired with the clamped value.
+    expect(window.localStorage.getItem('tc:pageMaxWidth')).toBe('1400');
+    expect(onPageMaxWidthChange).toHaveBeenCalledWith(1400);
+
+    // A too-small value is clamped up to the 320 floor on persist.
+    fireEvent.change(input, { target: { value: '50' } });
+    expect(window.localStorage.getItem('tc:pageMaxWidth')).toBe('320');
+    expect(onPageMaxWidthChange).toHaveBeenLastCalledWith(320);
   });
+
+  it('page max-width field initialises from a previously persisted value', async () => {
+    window.localStorage.setItem('tc:pageMaxWidth', '1280');
+    render(<SettingsDialog open onClose={onClose} agencyId="ag-equities" />);
+    expect((screen.getByTestId('page-max-width') as HTMLInputElement).value).toBe('1280');
+  });
+
 
   it('tokens render as password inputs; a seeded role (provider+model, no token) shows "configured" + "no token" (token never echoed)', async () => {
     render(<SettingsDialog open onClose={onClose} agencyId="ag-equities" />);

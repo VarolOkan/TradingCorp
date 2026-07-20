@@ -408,10 +408,13 @@ last-word veto instead of the equity preservation gate:
   decision. The equity (long-term) path is untouched when no `optionsVeto` is
   present.
 
-The frontend keeps a **hardcoded mirror** of the backend registry
-(`frontend/src/components/analysts/{agencies,analysts}.ts`) — adding a backend
-analyst/agency must be mirrored there, and `agency-mirror.test.ts` (vitest)
-fails if the two drift.
+The frontend **no longer hand-duplicates** the backend registry. A build-time
+generator (`scripts/gen-frontend-registry.ts`, wired into `prebuild` + `predev`
+via `npm run gen:registry`) projects the backend `src/registry/{analysts,agencies}.ts`
+(the single source of truth) into `frontend/src/components/analysts/{analysts,agencies}.generated.ts`.
+Adding a backend analyst/agency requires **zero** frontend edits — re-run the
+generator (automatic on `dev`/`build`). `agency-mirror.test.ts` (vitest) still
+guards against drift by comparing the generated files to the backend.
 
 ### Multi-flavor Role & Instructions (Phase F)
 

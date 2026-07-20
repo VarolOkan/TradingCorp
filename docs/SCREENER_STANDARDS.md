@@ -201,8 +201,10 @@ The three fields are edited in the **Agency settings dialog** (Settings ▸
 Agencies ▸ New/Edit), laid out on a single row (`.agency-screener-row`:
 Asset class · Screener interval · Lookback days). Saving persists them via
 `PUT/POST /registry/agency` (`registry-routes.ts` `summarize()` exposes them;
-the frontend mirror in `analysts/agencies.ts` carries them through
-`applyRegistryAgencies`).
+`applyRegistryAgencies` (in `frontend/src/components/analysts/agencies.ts`)
+hydrates the frontend `AGENCIES` from the persisted backend payload at runtime —
+the static `AGENCIES` catalog itself is generated from the backend by
+`npm run gen:registry`).
 
 ### UI readout
 

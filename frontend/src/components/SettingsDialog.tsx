@@ -32,6 +32,7 @@ import { getAnalystSourceCatalog, type AnalystSourceCatalogAnalyst } from '../ap
 import { DomainSourcesTab, type DomainSourcesTabHandle } from './analysts/DomainSourcesTab';
 import { buildAnalystConfigSchema, type SourceCredField } from './analysts/analystConfigSchema';
 import { SourcesTab, type SourcesTabHandle } from './analysts/SourcesTab';
+import { getPageMaxWidth, setPageMaxWidth as persistPageMaxWidth, PAGE_MAX_WIDTH_DEFAULT, PAGE_MAX_WIDTH_MIN, PAGE_MAX_WIDTH_MAX } from '../lib/uiPrefs';
 
 export interface SettingsDialogProps {
   open: boolean;
@@ -46,9 +47,11 @@ export interface SettingsDialogProps {
   onSaved?: (settings: ConnectionSettings) => void;
   /** Called after an agency is created/deleted so the parent re-renders live. */
   onRegistryChange?: () => void;
+  /** Called when the user changes the page max-width (px) so the page resizes live. */
+  onPageMaxWidthChange?: (px: number) => void;
 }
 
-type Tab = 'connection' | 'llm' | 'agencies' | 'analysts' | 'sources' | 'domains' | 'log';
+type Tab = 'general' | 'llm' | 'agencies' | 'analysts' | 'sources' | 'domains' | 'log';
 
 const DEFAULTS: ConnectionSettings = {
   baseUri: 'http://localhost:3001',
@@ -114,10 +117,11 @@ export function SettingsDialog({
   agencyId,
   onSaved,
   onRegistryChange,
+  onPageMaxWidthChange,
 }: SettingsDialogProps) {
-  const [tab, setTab] = useState<Tab>('connection');
+  const [tab, setTab] = useState<Tab>('general');
 
-  // ---- Connection tab state ----
+  // ---- General tab state ----
   const [baseUri, setBaseUri] = useState(DEFAULTS.baseUri);
   const [accessToken, setAccessToken] = useState('');
   const [extraKeys, setExtraKeys] = useState<string[]>([]);
@@ -126,6 +130,9 @@ export function SettingsDialog({
   const [connError, setConnError] = useState<string | null>(null);
   const [connSaving, setConnSaving] = useState(false);
   const [connSaved, setConnSaved] = useState(false);
+  // Page max-width (px) — initialized from the persisted preference so the
+  // field reflects the current value when the dialog opens.
+  const [pageMaxWidth, setPageMaxWidth] = useState<number>(() => getPageMaxWidth());
 
   // ---- LLM Models tab state ----
   const [llmConfigs, setLlmConfigs] = useState<LlmModelConfigPublic[]>([]);
@@ -635,7 +642,7 @@ export function SettingsDialog({
     setConnError(null);
     setConnSaved(false);
     setConnSaving(false);
-    setTab('connection');
+    setTab('general');
   }, [open, initial]);
 
   // Load LLM config when the dialog opens (or the session/agency changes).
@@ -811,12 +818,12 @@ export function SettingsDialog({
           <button
             type="button"
             role="tab"
-            aria-selected={tab === 'connection'}
-            className={tab === 'connection' ? 'settings-tab active' : 'settings-tab'}
-            data-testid="tab-connection"
-            onClick={() => setTab('connection')}
+            aria-selected={tab === 'general'}
+            className={tab === 'general' ? 'settings-tab active' : 'settings-tab'}
+            data-testid="tab-general"
+            onClick={() => setTab('general')}
           >
-            Connection
+            General
           </button>
           <button
             type="button"
@@ -881,9 +888,9 @@ export function SettingsDialog({
         </div>
 
         <TabErrorBoundary label="This settings tab">
-        {tab === 'connection' && (
+        {tab === 'general' && (
           <form onSubmit={handleConnSubmit}>
-            <h2>Connection Settings</h2>
+            <h2>General Settings</h2>
             <label>
               Backend URI
               <input
@@ -921,6 +928,37 @@ export function SettingsDialog({
                 </small>
               </span>
             </label>
+            <fieldset>
+              <legend>Page layout</legend>
+              <label className="settings-field">
+                <span>
+                  Page max width (px)
+                  <small>
+                    Caps how wide the content area grows. Defaults to 960. The
+                    page resizes live as you type and the value is remembered.
+                  </small>
+                </span>
+                <input
+                  type="number"
+                  min={PAGE_MAX_WIDTH_MIN}
+                  max={PAGE_MAX_WIDTH_MAX}
+                  step={10}
+                  value={pageMaxWidth}
+                  data-testid="page-max-width"
+                  aria-label="Page max width in pixels"
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    const next = Number.isFinite(raw) ? raw : PAGE_MAX_WIDTH_DEFAULT;
+                    // Clamp to the safe floor/ceiling so the live resize, the
+                    // persisted value, and the callback all agree.
+                    const clamped = Math.min(PAGE_MAX_WIDTH_MAX, Math.max(PAGE_MAX_WIDTH_MIN, next));
+                    setPageMaxWidth(clamped);
+                    persistPageMaxWidth(clamped);
+                    onPageMaxWidthChange?.(clamped);
+                  }}
+                />
+              </label>
+            </fieldset>
             <fieldset>
               <legend>Extra parameters</legend>
               {extraKeys.map((key, idx) => (

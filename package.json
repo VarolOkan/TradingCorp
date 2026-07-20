@@ -4,9 +4,12 @@
   "description": "Multi-agent financial analysis system (TradingCorp) with preservation-first philosophy",
   "main": "src/server/index.ts",
   "scripts": {
+    "gen:registry": "tsx scripts/gen-frontend-registry.ts",
+    "predev": "npm run gen:registry",
     "dev": "vite --config vite.config.ts",
-    "dev:all": "concurrently -n server,web -c blue,green \"LLM_VAULT_PASSPHRASE=my_secret PORT=${PORT:-3001} npm run server\" \"VITE_SERVER_PORT=${PORT:-3001} npm run dev\"",
+    "prebuild": "npm run gen:registry",
     "build": "npm rebuild better-sqlite3 && npx vite build --config vite.config.ts",
+    "dev:all": "concurrently -n server,web -c blue,green \"LLM_VAULT_PASSPHRASE=my_secret PORT=${PORT:-3001} npm run server\" \"VITE_SERVER_PORT=${PORT:-3001} npm run dev\"",
     "start": "npm run build && npm run server",
     "server": "tsx src/server/index.ts",
     "server:watch": "tsx watch src/server/index.ts",

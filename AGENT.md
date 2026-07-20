@@ -247,10 +247,13 @@ MCP server; PyPI package is **`graphifyy`** (two y's).
   60+ backend test files, 322 frontend tests). An agent orienting on a task
   currently reads many files; subgraph retrieval ("show everything touching
   `resolveLiveOptionsBundle`") cuts that dramatically.
-- The frontend **mirrors** the backend registry (`frontend/src/components/
-  analysts/{agencies,analysts}.ts` duplicate `src/registry/`) — a known drift
-  risk guarded by `agency-mirror.test.ts`. A code graph makes cross-tree impact
-  analysis trivial.
+- The frontend **no longer duplicates** the backend registry. A build-time
+  generator (`scripts/gen-frontend-registry.ts`, run via `npm run gen:registry`,
+  wired into `predev`/`prebuild`) projects `src/registry/{analysts,agencies}.ts`
+  into `frontend/src/components/analysts/{analysts,agencies}.generated.ts`. The
+  hand-written `analysts.ts`/`agencies.ts` re-export the generated data + keep
+  runtime helpers. `agency-mirror.test.ts` guards against generator drift. A
+  code graph makes cross-tree impact analysis trivial.
 
 **Token-saving claims (VENDOR claims from the site — not independently
 benchmarked on this repo):** the site advertises *"Cut Your Claude Token

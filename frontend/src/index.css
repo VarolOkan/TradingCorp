@@ -80,13 +80,16 @@ body {
   border-color: #475569 !important;
 }
 
-/* Analysis view (Phase3) */
-/* Fixed 950px width so the options chain's two panes + strike column fit exactly
-   without the PUTS pane needing a bottom horizontal scrollbar (the only slider is
-   the required vertical one on the far right edge). */
+/* Analysis view (Phase3) — follows the page max-width set in Settings ▸ General
+   (applied to the parent .content via inline style). It fills that constraint
+   (width:100%) so the whole page — including the options chain's two panes +
+   strike column — scales with the chosen width instead of being pinned to a
+   fixed 950px. A min-width keeps the options chain readable if the user sets a
+   very narrow page; the parent still caps it at the chosen max-width. */
 .analysis-view {
-  width: 950px;
-  max-width: 950px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin: 0 auto;
 }
 .analysis-form {
@@ -2948,14 +2951,15 @@ body {
   box-shadow: inset 0 0 0 2px rgba(251, 191, 36, 0.85);
 }
 
-/* Fixed-width canvas for the analysis view. The options table uses
-   width:max-content and would otherwise grow with its content, forcing BOTH a
-   horizontal AND a vertical scrollbar on the PUTS pane. Capping the view at a
-   fixed 950px lets the table hit that ceiling and scroll horizontally inside
-   the panes instead — so only the right-edge vertical scrollbar appears.
-   max-width:100% keeps it responsive on narrow screens. */
+/* Canvas for the analysis view. The options table uses width:max-content and
+   would otherwise grow with its content, forcing BOTH a horizontal AND a
+   vertical scrollbar on the PUTS pane. Capping the view at the page width
+   (it fills the parent .content, which carries the Settings ▸ General
+   max-width via inline style) lets the table hit that ceiling and scroll
+   horizontally inside the panes instead — so only the right-edge vertical
+   scrollbar appears. max-width:100% keeps it responsive on narrow screens. */
 .analysis-view {
-  width: 950px;
+  width: 100%;
   max-width: 100%;
 }
 .options-greeks {

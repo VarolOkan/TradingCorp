@@ -69,10 +69,14 @@ no compiled JS `main`. **Mitigated:** `npm run server` runs
   handler. Those signals are synthetic (seeded), so the veto is a faithful
   *mechanism* exercised by tests, not a market-risk engine. No live risk feed backs
   it.
-- **Frontend mirror is hardcoded.** Agencies/analysts are duplicated in
-  `frontend/src/components/analysts/{agencies,analysts}.ts` (the backend registry is
-  not imported at runtime). `agency-mirror.test.ts` guards against drift, but adding
-  an analyst still requires a manual frontend edit.
+- **Frontend mirror is now build-time hydrated (CLOSED).** Agencies/analysts are
+  no longer hand-duplicated. `scripts/gen-frontend-registry.ts` projects the
+  backend `src/registry/{analysts,agencies}.ts` (the single source of truth) into
+  `frontend/src/components/analysts/{analysts,agencies}.generated.ts`, wired into
+  `prebuild` + `predev` (`npm run gen:registry`). Adding an analyst/agency to the
+  backend now requires **zero** frontend edits. `agency-mirror.test.ts` still
+  guards against drift (compares the generated files to the backend) in case the
+  generator mapping regresses.
 
 ## 5. Massive options-entitlement gap
 

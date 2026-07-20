@@ -151,7 +151,7 @@ TradingCorp/
 │   │   │   │   ├── AnalystWall.tsx  AnalystTraceDrawer.tsx
 │   │   │   │   ├── AgencySelect.tsx  AgencySettingsDialog.tsx  AgencyReorgDialog.tsx
 │   │   │   │   ├── SourcesTab.tsx  DomainSourcesTab.tsx           # swappable-source config UI
-│   │   │   │   └── analysts.ts  agencies.ts  analystConfigSchema.ts   # frontend mirror of the registry
+│   │   │   │   └── analysts.ts  agencies.ts  analystConfigSchema.ts   # frontend registry (generated from backend via gen:registry)
 │   │   │   └── compare/              # multi-ticker compare (perf chart, correlation matrix)
 │   │   ├── api/                      # one typed client per backend route group
 │   │   │   ├── configClient.ts  llmConfigClient.ts  registryClient.ts
@@ -494,8 +494,9 @@ npm run test:ui     # frontend vitest suite + coverage report
   before any mock. The unified **`MarketDataCard`** shows real company name,
   price, ranges, volume, a D3 price chart, and a real option chain with
   feed-provided/derived greeks. Provenance is surfaced honestly (LIVE/DELAYED/
-  MOCK badges + per-domain source notes); the vol-surface remains a deterministic
-  mock.
+  MOCK badges + per-domain source notes); the vol-surface IV history is now
+  **market-calibrated** from the real per-tenor ATM IVs of the acquired chain
+  (when a live chain is present), not a seeded series.
 - Full details and the external-data integration roadmap:
   [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
 - **AI agents working in this repo: read [`AGENT.md`](AGENT.md) first** — it holds

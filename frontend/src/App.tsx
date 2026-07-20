@@ -8,6 +8,7 @@ import { getAnalystSourceCatalog } from './api/analystConfigClient';
 import { getRegistry } from './api/registryClient';
 import { applyRegistryAgencies } from './components/analysts/agencies';
 import { AGENCY_IDS, DEFAULT_AGENCY, type AgencyId } from './components/analysts/agencies';
+import { getPageMaxWidth, setPageMaxWidth as persistPageMaxWidth } from './lib/uiPrefs';
 
 // Connect the socket to the SAME ORIGIN that served the page. In dev the Vite
 // proxy forwards `/socket.io` (ws) to the backend; in prod the backend serves
@@ -39,6 +40,14 @@ function App() {
   // Bumped when an agency is created/deleted in the Settings dialog so the
   // AnalysisView dropdown re-renders from the mutated AGENCIES mirror live.
   const [registryVersion, setRegistryVersion] = useState(0);
+  // Page max-width (px), persisted in localStorage. Applied to the .content
+  // <main> so the whole page honors the user's chosen width.
+  const [pageMaxWidth, setPageMaxWidth] = useState<number>(() => getPageMaxWidth());
+
+  const handlePageMaxWidthChange = useCallback((px: number) => {
+    const clamped = persistPageMaxWidth(px);
+    setPageMaxWidth(clamped);
+  }, []);
 
   // Pull the persisted registry once on mount (and on (re)connect) so the
   // AGENCIES mirror — which feeds the top-right agency dropdown — includes
@@ -175,7 +184,7 @@ function App() {
         </div>
       </header>
 
-      <main className="content">
+      <main className="content" style={{ maxWidth: pageMaxWidth }}>
         <AnalysisView
           socket={socket}
           connected={connected}
@@ -197,6 +206,7 @@ function App() {
         agencyId={agencyId}
         onSaved={(s) => setSettings(s)}
         onRegistryChange={() => setRegistryVersion((v) => v + 1)}
+        onPageMaxWidthChange={handlePageMaxWidthChange}
       />
     </div>
   );
