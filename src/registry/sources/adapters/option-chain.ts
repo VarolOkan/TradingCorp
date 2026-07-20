@@ -17,7 +17,7 @@ import {
   chainToGreeksRows,
 } from '../../logic/hist';
 import type { HistProfile } from '../../logic/hist';
-import type { OptionChain, PriceBarSeries, HistoricalBundle } from '../../../types/financial-analysis';
+import type { OptionChain, PriceBarSeries, HistoricalBundle, OptionQuote } from '../../../types/financial-analysis';
 import { resolveRfr } from '../../logic/greeks';
 import { acquirePriceBars } from './price-bars';
 import { logger } from '../../../utils/logger';
@@ -292,6 +292,13 @@ export interface LiveOptionsResult extends HistoricalBundle {
   chainLive?: boolean;
   /** True when the historical price BARS were acquired live (tracked separately). */
   barsLive?: boolean;
+  /**
+   * Origin of the `iv_history` series.
+   *  - 'real-chain': derived from the LIVE chain's per-tenor ATM IVs
+   *    (market-calibrated). Set only when a live chain was acquired.
+   *  - 'seeded': synthetic fallback (no live chain). Subset of `source`.
+   */
+  ivHistorySource?: 'real-chain' | 'seeded';
   /** Provenance note (e.g. Massive 401 entitlement story, or CBOE delayed feed). */
   note?: string;
 }
@@ -344,6 +351,22 @@ export async function resolveLiveOptionsBundle(
   const greeks = chainToGreeksRows(option_chain, underlying_price, rfr);
   const expiries = chainFinal.source === 'mock' ? base.expiries : chainFinal.expiries;
 
+  // Calibrate iv_history honestly:
+  //  - LIVE chain → derive the history from the REAL per-tenor ATM IVs of the
+  //    acquired chain (a cross-sectional/term-structure reference). This makes
+  //    iv_percentile/iv_rank market-calibrated with NO seeded values.
+  //  - no live chain → keep the deterministic seeded history (parity), flagged
+  //    so the vol-surface analyst reports seeded-parity rather than "live".
+  let iv_history = base.iv_history;
+  let ivHistorySource: 'real-chain' | 'seeded' = 'seeded';
+  if (chainFinal.source !== 'mock' && option_chain.length > 0) {
+    const realAtm = atmIvPerTenor(option_chain, underlying_price);
+    if (realAtm.length > 0) {
+      iv_history = realAtm;
+      ivHistorySource = 'real-chain';
+    }
+  }
+
   const live = !priceMock && chainFinal.source !== 'mock';
   return {
     ticker,
@@ -353,9 +376,38 @@ export async function resolveLiveOptionsBundle(
     greeks,
     rfr,
     expiries,
-    iv_history: base.iv_history,
+    iv_history,
+    ivHistorySource,
     mock: !live,
     source: chainFinal.source,
     ...(chainFinal.note ? { note: chainFinal.note } : {}),
   };
+}
+
+/**
+ * Real per-tenor ATM IVs from a live option chain. For each expiry, take the IV
+ * of the strike closest to spot (avg C/P). Returns the sorted unique ATM IVs —
+ * a market-derived reference set (no seeding). Used to calibrate `iv_history`
+ * so vol-surface percentile/rank reflect REAL IVs per strike/tenor.
+ */
+function atmIvPerTenor(chain: OptionQuote[], spot: number): number[] {
+  const byExpiry = new Map<string, OptionQuote[]>();
+  for (const q of chain) {
+    if (!Number.isFinite(q.iv) || q.iv <= 0) continue; // skip illiquid/missing IV
+    const arr = byExpiry.get(q.expiry) ?? [];
+    arr.push(q);
+    byExpiry.set(q.expiry, arr);
+  }
+  const atm: number[] = [];
+  for (const rows of byExpiry.values()) {
+    if (rows.length === 0) continue;
+    let best = rows[0]!;
+    for (const r of rows) {
+      if (Math.abs(r.strike - spot) < Math.abs(best.strike - spot)) best = r;
+    }
+    const atStrike = rows.filter((r) => r.strike === best.strike);
+    const avg = atStrike.reduce((s, r) => s + r.iv, 0) / atStrike.length;
+    if (Number.isFinite(avg) && avg > 0) atm.push(parseFloat(avg.toFixed(4)));
+  }
+  return atm;
 }

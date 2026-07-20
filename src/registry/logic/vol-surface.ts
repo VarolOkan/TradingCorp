@@ -102,6 +102,12 @@ export function buildVolSurface(
         )
       : 0;
 
+  const ivHistorySource: 'real-chain' | 'seeded' = bundle.ivHistorySource === 'real-chain' ? 'real-chain' : 'seeded';
+  const ivHistoryNote =
+    ivHistorySource === 'real-chain'
+      ? 'iv_history calibrated from the REAL option chain\'s per-tenor ATM IVs (market-derived term-structure reference; no seeded values).'
+      : 'iv_history is a synthetic fallback (no live chain) — iv_percentile/iv_rank are NOT market-calibrated.';
+
   const iv_percentile = percentileOf(atm_iv, bundle.iv_history);
   const iv_rank = rankOf(atm_iv, bundle.iv_history);
 
@@ -111,6 +117,9 @@ export function buildVolSurface(
   if (skew_slope > 0.05) flags.push('call_skew');
   if (iv_percentile >= 90) flags.push('iv_elevated');
   if (iv_percentile <= 10) flags.push('iv_depressed');
+  // Honest flag: when the history is seeded, the percentile/rank is not a real
+  // market reading — surface that so it can't be mistaken for calibrated data.
+  if (ivHistorySource === 'seeded') flags.push('iv_history_uncalibrated');
 
   return {
     atm_iv,
@@ -118,6 +127,8 @@ export function buildVolSurface(
     term_slope,
     iv_percentile,
     iv_rank,
+    iv_history_source: ivHistorySource,
+    iv_history_note: ivHistoryNote,
     by_expiry,
     flags,
   };

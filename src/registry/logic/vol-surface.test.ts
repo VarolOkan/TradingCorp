@@ -31,6 +31,58 @@ describe('vol-surface — from mock bundle', () => {
       expect(e.ttm_years).toBeGreaterThanOrEqual(0);
     }
   });
+
+  it('reports iv_history_source + note, and flags uncalibrated when seeded', () => {
+    // The default mock bundle has no ivHistorySource → treated as seeded.
+    expect(vs.iv_history_source).toBe('seeded');
+    expect(vs.iv_history_note).toMatch(/synthetic fallback/i);
+    expect(vs.flags).toContain('iv_history_uncalibrated');
+  });
+});
+
+describe('vol-surface — real-chain calibration (honest provenance)', () => {
+  // A bundle whose iv_history was derived from the REAL chain's per-tenor ATM
+  // IVs (set by the options ingestion layer when a live chain was acquired).
+  function realChainBundle(ivByStrike: (k: number, i: number) => number, expiries: string[]): HistoricalBundle {
+    const spot = 100;
+    const chain: OptionQuote[] = [];
+    expiries.forEach((expiry, expIdx) => {
+      for (let strike = 80; strike <= 120; strike += 5) {
+        for (const type of ['C', 'P'] as const) {
+          chain.push({
+            expiry, strike, type, bid: 1, ask: 1.1, last: 1.05, volume: 10, open_interest: 100,
+            iv: ivByStrike(strike, expIdx), underlying_price: spot, underlying_ts: '2026-07-10T00:00:00.000Z',
+          });
+        }
+      }
+    });
+    return {
+      ticker: 'SYN', underlying_price: spot, price_bars: [], option_chain: chain, greeks: [], rfr: 0.043,
+      expiries, iv_history: [0.2, 0.25, 0.3], ivHistorySource: 'real-chain', mock: false,
+    };
+  }
+
+  it('marks iv_history_source real-chain and does NOT flag uncalibrated', () => {
+    const b = realChainBundle(() => 0.3, ['2026-07-17', '2026-08-21', '2026-09-18']);
+    const vs = buildVolSurface(b);
+    expect(vs.iv_history_source).toBe('real-chain');
+    expect(vs.iv_history_note).toMatch(/market-derived|market-calibrated/i);
+    expect(vs.flags).not.toContain('iv_history_uncalibrated');
+  });
+
+  it('computes iv_percentile/rank against the REAL per-tenor ATM IVs, not a seeded series', () => {
+    // Three tenors with distinct ATM IVs 0.20 / 0.30 / 0.40. With useFrontMonth,
+    // the FRONT month (0.20) is the lowest of the real cross-section, so it sits
+    // at ~33rd percentile / rank 0 within that calibrated history.
+    const expiries = ['2026-07-17', '2026-08-21', '2026-09-18'];
+    const tenorIv = [0.2, 0.3, 0.4];
+    const b = realChainBundle((_k, i) => tenorIv[i]!, expiries);
+    const vs = buildVolSurface(b, { useFrontMonth: true });
+    expect(vs.iv_history_source).toBe('real-chain');
+    // Calibrated history = real per-tenor ATM IVs [0.20, 0.30, 0.40]; front-month 0.20 is the min.
+    expect(vs.iv_percentile).toBeCloseTo(33.33, 1);
+    expect(vs.iv_rank).toBe(0);
+  });
 });
 
 describe('vol-surface — synthetic chain (known slopes)', () => {

@@ -13,41 +13,22 @@
 import { describe, it, expect } from '@jest/globals';
 import { acquireOptionChain, resolveLiveOptionsBundle } from '../registry/sources/adapters/option-chain';
 
-// Real-shape CBOE payload (trimmed). parseCboeOptions reads data.options[].
-const CBOE_PAYLOAD = {
+// Real-shape CBOE payload with THREE expiries at distinct ATM IVs so we can
+// prove iv_history is calibrated from the REAL per-tenor ATM IVs (not seeded).
+// Expiry 1 (260717) ATM ~0.77/0.81, Expiry 2 (260821) ATM ~0.55, Expiry 3 (260918) ATM ~0.40.
+const CBOE_PAYLOAD_MULTI = {
   timestamp: '2026-07-18 11:40:49',
   data: {
     options: [
-      {
-        option: 'NVDA260717C00002500',
-        bid: 196.05,
-        ask: 204.45,
-        iv: 0.77,
-        open_interest: 17,
-        volume: 0,
-        delta: 1.0,
-        gamma: 0.0,
-        vega: 0.0,
-        theta: 0.0,
-        rho: 0.0,
-        theo: 200.635,
-        change: 0,
-      },
-      {
-        option: 'NVDA260717P00002500',
-        bid: 0.05,
-        ask: 0.12,
-        iv: 0.81,
-        open_interest: 9,
-        volume: 2,
-        delta: -1.0,
-        gamma: 0.0,
-        vega: 0.0,
-        theta: 0.0,
-        rho: 0.0,
-        theo: 0.08,
-        change: 0,
-      },
+      // --- Expiry 1 (2026-07-17), ATM strike 250 → iv 0.79 ---
+      { option: 'NVDA260717C00000250', bid: 196.05, ask: 204.45, iv: 0.77, open_interest: 17, volume: 0, delta: 1.0, gamma: 0, vega: 0, theta: 0, rho: 0, theo: 200.635, change: 0 },
+      { option: 'NVDA260717P00000250', bid: 0.05, ask: 0.12, iv: 0.81, open_interest: 9, volume: 2, delta: -1.0, gamma: 0, vega: 0, theta: 0, rho: 0, theo: 0.08, change: 0 },
+      // --- Expiry 2 (2026-08-21), ATM strike 250 → iv 0.55 ---
+      { option: 'NVDA260821C00000250', bid: 80.0, ask: 84.0, iv: 0.54, open_interest: 10, volume: 1, delta: 1.0, gamma: 0, vega: 0, theta: 0, rho: 0, theo: 82.0, change: 0 },
+      { option: 'NVDA260821P00000250', bid: 0.5, ask: 0.9, iv: 0.56, open_interest: 8, volume: 1, delta: -1.0, gamma: 0, vega: 0, theta: 0, rho: 0, theo: 0.7, change: 0 },
+      // --- Expiry 3 (2026-09-18), ATM strike 250 → iv 0.40 ---
+      { option: 'NVDA260918C00000250', bid: 40.0, ask: 43.0, iv: 0.39, open_interest: 5, volume: 0, delta: 1.0, gamma: 0, vega: 0, theta: 0, rho: 0, theo: 41.5, change: 0 },
+      { option: 'NVDA260918P00000250', bid: 1.0, ask: 1.5, iv: 0.41, open_interest: 4, volume: 0, delta: -1.0, gamma: 0, vega: 0, theta: 0, rho: 0, theo: 1.25, change: 0 },
     ],
   },
 };
@@ -57,7 +38,7 @@ const CBOE_URL = 'cdn.cboe.com/api/global/delayed_quotes/options';
 
 /** fetchFn that returns 401 for Massive (keyed live call fails) and a valid
  *  CBOE payload for the CBOE URL. */
-function failedMassiveThenCboeFetch() {
+function failedMassiveThenCboeFetch(payload: any = CBOE_PAYLOAD_MULTI) {
   return async (url: string) => {
     if (url.includes(MASSIVE_URL)) {
       return {
@@ -69,7 +50,7 @@ function failedMassiveThenCboeFetch() {
       };
     }
     if (url.includes(CBOE_URL)) {
-      return { ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify(CBOE_PAYLOAD), json: async () => CBOE_PAYLOAD };
+      return { ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify(payload), json: async () => payload };
     }
     // Yahoo tokenless fallback path -> also "unreachable" so the test isolates
     // the Massive->CBOE hop.
@@ -80,7 +61,7 @@ function failedMassiveThenCboeFetch() {
 describe('option-chain CBOE fallback after failed Massive key', () => {
   it('acquireOptionChain returns source=cboe when Massive 401s (key configured)', async () => {
     const r = await acquireOptionChain('NVDA', {
-      apiKey: 'SOME_ENTITLEMENT_401_KEY',
+      apiKey: 'SOME_...EY',
       fetchFn: failedMassiveThenCboeFetch() as any,
     });
     expect(r.source).toBe('cboe');
@@ -92,10 +73,25 @@ describe('option-chain CBOE fallback after failed Massive key', () => {
     const b = await resolveLiveOptionsBundle(
       'NVDA',
       { lookbackDays: 90, intervals: ['1d'] },
-      { apiKey: 'SOME_ENTITLEMENT_401_KEY', fetchFn: failedMassiveThenCboeFetch() as any },
+      { apiKey: 'SOME_...EY', fetchFn: failedMassiveThenCboeFetch() as any },
     );
     expect(b.source).toBe('cboe');
     expect((b.option_chain?.length ?? 0)).toBeGreaterThan(0);
+  });
+
+  it('calibrates iv_history from the REAL per-tenor ATM IVs (no seeded values)', async () => {
+    // With a real CBOE chain, iv_history must be the REAL per-tenor ATM IVs
+    // ([0.79, 0.55, 0.40]) — NOT the deterministic seeded series. This is the
+    // core of closing §4's BS-assumption: rankings are market-calibrated.
+    const b = await resolveLiveOptionsBundle(
+      'NVDA',
+      { lookbackDays: 90, intervals: ['1d'] },
+      { apiKey: 'SOME_...EY', fetchFn: failedMassiveThenCboeFetch() as any },
+    );
+    expect(b.ivHistorySource).toBe('real-chain');
+    expect(b.iv_history).toEqual(expect.arrayContaining([0.79, 0.55, 0.40]));
+    // The seeded base.iv_history must NOT have leaked through.
+    expect(b.iv_history).toHaveLength(3);
   });
 
   it('does NOT claim cboe when the CBOE feed is also unreachable (honest mock)', async () => {

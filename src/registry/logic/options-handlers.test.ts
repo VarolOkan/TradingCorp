@@ -91,6 +91,16 @@ describe('Phase B — options handlers', () => {
       expect(trace.output.details.results['AAPL'].data.max_loss).toBeLessThanOrEqual(500);
     });
 
+    it('vol_surface reports seeded-parity with a human description when IV history is not live', async () => {
+      const out = await runWithData(volSurfaceHandler);
+      const trace = (out.analystTraces as AnyTrace[]).find((t) => t.analyst === 'vol_surface')!;
+      // seeded-parity alone is meaningless to a user — the trace must also
+      // describe WHAT that means (the IV history readings are not real market data).
+      expect(trace.dataProvenance).toBe('seeded-parity');
+      const noteText = (trace.notes ?? []).join(' ');
+      expect(noteText).toMatch(/IV (percentile|history)|synthetic|NOT (real )?market/i);
+    });
+
     it('intraday horizon tightens options_risk sizing + IV cap', async () => {
       const intraday = await runWithData(optionsRiskHandler, { horizon: 'INTRADAY', params: {} } as AnalystTuning);
       const medium = await runWithData(optionsRiskHandler, { horizon: 'MEDIUM_TERM', params: {} } as AnalystTuning);

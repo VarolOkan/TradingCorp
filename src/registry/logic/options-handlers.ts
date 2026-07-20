@@ -311,6 +311,12 @@ export async function volSurfaceHandler(state: AgentState, node: NodeSurface, tu
       { label: 'Term premium', inputs: ['term_slope'], weight: 0.3, rationale: 'Positive term slope rewards calendars.', contribution: 30, scale: '0..100' },
       { label: 'IV vs realized', inputs: ['iv_percentile'], weight: 0.2, rationale: 'Rich IV favors selling; cheap favors buying.', contribution: 20, scale: '0..100' },
     ],
+    // Honest description for the user: when the IV history is NOT from the live
+    // chain, the percentile/rank readings are synthetic — say so plainly
+    // (seeded-parity alone means nothing to a user without this context).
+    notes: [
+      'IV percentile/rank are computed against the IV history series. When that series is derived from the live option chain (per-tenor ATM IVs) it is market-calibrated; when no live chain is available it is a synthetic fallback and the readings are NOT real market data.',
+    ],
     compute: (_ticker, bundle) => {
       const useFrontMonth = tuning?.horizon === 'INTRADAY';
       const vs = buildVolSurface(bundle, { useFrontMonth });

@@ -928,6 +928,16 @@ export interface HistoricalBundle {
   expiries: string[];
   /** Historical ATM IV samples (for iv_rank/iv_percentile in vol-surface). */
   iv_history: number[];
+  /**
+   * Honest origin of `iv_history`.
+   *  - 'real-chain': the series was derived from the REAL option chain's
+   *    per-tenor ATM IVs (a cross-sectional/term-structure reference), so
+   *    iv_percentile/iv_rank are market-calibrated — no seeded values.
+   *  - 'seeded': the series is a deterministic synthetic fallback (no live
+   *    chain). Rankings are NOT market-calibrated and must be flagged.
+   * Omit = unknown → treat as 'seeded' (conservative).
+   */
+  ivHistorySource?: 'real-chain' | 'seeded';
   /** True when produced from the deterministic mock (no live keys). */
   mock: boolean;
 }
@@ -946,6 +956,15 @@ export interface VolSurface {
   iv_percentile: number;
   /** Current ATM IV rank vs iv_history min/max [0..100]. */
   iv_rank: number;
+  /**
+   * Origin of the `iv_history` series used for iv_percentile/iv_rank.
+   *  - 'real-chain': derived from the REAL chain's per-tenor ATM IVs
+   *    (market-calibrated, no seeded values).
+   *  - 'seeded': synthetic fallback — NOT market-calibrated.
+   */
+  iv_history_source: 'real-chain' | 'seeded';
+  /** Human-readable description of how iv_history was obtained (for the trace). */
+  iv_history_note: string;
   /** Per-expiry fitted summary (ATM IV + skew per tenor). */
   by_expiry: Array<{
     expiry: string;

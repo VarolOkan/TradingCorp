@@ -5,13 +5,19 @@ what is mock-gated, and what is a known external gap. Fixed/resolved work has
 been removed; the full history lives in `docs/archive/`. Run `npm test` for the
 current pass/fail state.
 
-## 1. Scoring/verdicts and the vol-surface remain deterministic (seeded) models
+## 1. Scoring/verdicts remain deterministic (seeded) models
 
 The per-analyst *scoring* verdicts are produced by deterministic handlers that
 **consume the live inputs** but whose score/weighting logic is the seeded model.
-The vol-surface (`vol-surface.ts`) is still a deterministic mock, not a calibrated
-market surface. CBOE occasionally reports `iv: 0` for illiquid deep-ITM contracts
-— treated as missing (not fed downstream as 0).
+The vol-surface (`vol-surface.ts`) is a **pure fitter** that reads the real
+per-strike IVs from the acquired chain (CBOE/Polygon/Massive) and fits
+skew/term/atm_iv via OLS. `iv_history` is **now calibrated from the REAL chain's
+per-tenor ATM IVs** when a live chain is present (`ivHistorySource: 'real-chain'`),
+so `iv_percentile`/`iv_rank` are market-calibrated — see `option-chain.ts`
+`resolveLiveOptionsBundle` + `atmIvPerTenor`. When no live chain is available the
+IV history stays seeded and is flagged `seeded` (vol-surface analyst reports
+`seeded-parity` with a human description). CBOE occasionally reports `iv: 0` for
+illiquid deep-ITM contracts — treated as missing (not fed downstream as 0).
 
 **Provenance is honest:** `data-ingestion.ts` emits a `data_quality.sources` list
 and per-domain `source` (`live`/`seeded`/`mock`/`yahoo`/`cboe`/`polygon`). The UI
@@ -53,9 +59,11 @@ no compiled JS `main`. **Mitigated:** `npm run server` runs
 
 - **Black–Scholes assumptions.** Pricing/greeks use a textbook Black–Scholes model
   (`src/registry/logic/greeks.ts`) with **constant volatility** (per-expiry IV from
-  the bundle), no dividend, no early-exercise/American feature, no volatility skew
-  term-structure. The option quotes in the bundle are RNG-seeded, so every "edge" /
-  "IV percentile" figure is synthetic.
+  the bundle), no dividend, no early-exercise/American feature. The per-strike IVs
+  come from the REAL acquired chain when live (CBOE/Polygon/Massive), and the
+  vol-surface `iv_history` is **market-calibrated** from the real per-tenor ATM IVs
+  (`ivHistorySource: 'real-chain'`). When no live chain is present the IV history is
+  seeded and the vol-surface analyst reports `seeded-parity` with a description.
 - **`options_risk` / governance veto are mock-gated.** The governance options veto
   acts on `iv_percentile`, `max_loss`, `risk_level` emitted by the `options_risk`
   handler. Those signals are synthetic (seeded), so the veto is a faithful
