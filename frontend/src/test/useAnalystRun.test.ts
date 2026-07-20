@@ -97,6 +97,46 @@ describe('useAnalystRun (event-driven)', () => {
     expect(result.current.state.cells[0].ticker).toBe('MSFT');
   });
 
+  it('REGRESSION: parallel fan-out — running stays true until the LAST analyst finishes', () => {
+    // Reproduces the UI timer-freeze bug: options analysts run in parallel.
+    // When the first analyst emits done, the run is NOT over (others are still
+    // active). `running` must remain true at that point so the wall's live
+    // count-up interval keeps ticking the still-running panels. It must only
+    // flip to false once every started analyst has emitted done.
+    const socket = makeFakeSocket();
+    const onComplete = vi.fn();
+    const ids = ['options_ingestion', 'vol_surface', 'options_risk'];
+    const { result } = renderHook(() =>
+      useAnalystRun(socket as any, ['TSLA'], { onComplete, analystIds: ids })
+    );
+
+    // All three start in parallel.
+    act(() => {
+      for (const id of ids) socket.emit('analyst_start', { analyst: id, tickers: ['TSLA'] });
+    });
+    expect(result.current.state.running).toBe(true);
+    expect(result.current.state.cells.every((c) => c.phase === 'active')).toBe(true);
+
+    // First analyst finishes — run must still be "running".
+    act(() => socket.emit('analyst_done', { analyst: 'options_ingestion', tickers: ['TSLA'] }));
+    expect(result.current.state.cells.find((c) => c.analyst === 'options_ingestion')!.phase).toBe('done');
+    expect(result.current.state.running).toBe(true);
+    expect(result.current.state.completed).toBe(false);
+    expect(onComplete).not.toHaveBeenCalled();
+
+    // Second analyst finishes — still running, third still active.
+    act(() => socket.emit('analyst_done', { analyst: 'vol_surface', tickers: ['TSLA'] }));
+    expect(result.current.state.running).toBe(true);
+    expect(result.current.state.cells.find((c) => c.analyst === 'vol_surface')!.phase).toBe('done');
+
+    // Final analyst finishes — NOW the run is done.
+    act(() => socket.emit('analyst_done', { analyst: 'options_risk', tickers: ['TSLA'] }));
+    expect(result.current.state.running).toBe(false);
+    expect(result.current.state.completed).toBe(true);
+    expect(result.current.state.cells.every((c) => c.phase === 'done')).toBe(true);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
   it('REGRESSION: a whole run streamed before any re-render still lights every panel (no Standing by)', () => {
     // Reproduces the live symptom: the user clicks Analyze, the server emits
     // analysis_start + every analyst_start/done almost immediately (a fast,

@@ -180,17 +180,21 @@ export function useAnalystRun(
         ),
       }));
       doneCount.current += 1;
-      // Mark the run not-running on every done (the last one sticks). The
-      // completed/onComplete latch fires exactly once per run.
-      const reachedComplete =
-        !completedRef.current && startCount.current > 0 && doneCount.current >= startCount.current;
-      if (reachedComplete) completedRef.current = true;
+      // The run stays "running" until EVERY started analyst has emitted done.
+      // Flipping running:false on the first done would clear the wall's
+      // live-tick interval and freeze the timers on analysts that are still
+      // active (parallel fan-out). This is independent of the `completed`
+      // latch below, which fires exactly once per run.
+      const allDone =
+        startCount.current > 0 && doneCount.current >= startCount.current;
+      const justCompleted = allDone && !completedRef.current;
+      if (justCompleted) completedRef.current = true;
       setState((s) => ({
         ...s,
-        running: false,
-        ...(reachedComplete ? { completed: true } : null),
+        running: !allDone,
+        ...(justCompleted ? { completed: true } : null),
       }));
-      if (reachedComplete) onCompleteRef.current?.();
+      if (justCompleted) onCompleteRef.current?.();
     };
 
     const onError = () => {

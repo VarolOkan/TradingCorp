@@ -75,4 +75,49 @@ describe('AgencyGraph parallel execution', () => {
     // canRunParallel refuses (live source on a parallel analyst) → serial wiring.
     expect(g.parallel).toBe(false);
   });
+
+  it('options-intraday wires in parallel after ingestion (uniform-depth stage-2 fan-in)', () => {
+    // options_pricing depends only on options_ingestion (NOT vol_surface), so
+    // every stage-2 analyst shares the same depth — parallelTopologySafe passes
+    // and the agency fans out concurrently after ingestion, just like equity.
+    const g = new AgencyGraph(AGENCIES['options-intraday']!, { parallel: true });
+    expect(g.parallel).toBe(true);
+    // The stage-2 set must all run (no analyst dropped by the wiring).
+    const ids = g.nodeOrder;
+    for (const id of ['options_ingestion', 'vol_surface', 'options_pricing',
+      'options_greeks', 'options_flow', 'options_technical', 'options_risk', 'governance']) {
+      expect(ids).toContain(id);
+    }
+  });
+
+  it('options-swing wires in parallel after ingestion (uniform-depth stage-2 fan-in)', () => {
+    const g = new AgencyGraph(AGENCIES['options-swing']!, { parallel: true });
+    expect(g.parallel).toBe(true);
+    const ids = g.nodeOrder;
+    for (const id of ['options_ingestion', 'vol_surface', 'options_pricing',
+      'options_greeks', 'options_flow', 'options_risk', 'governance']) {
+      expect(ids).toContain(id);
+    }
+  });
+
+  it('options-intraday parallel run completes with every analyst producing a trace (no dropped node)', async () => {
+    const g = new AgencyGraph(AGENCIES['options-intraday']!, { parallel: true });
+    const result = await g.execute(seedState());
+    expect(result.error).toBeFalsy();
+    expect(result.final_decision).toBeTruthy();
+    const analysts = (result.analystTraces ?? []).map((t: any) => t.analyst).sort();
+    for (const id of ['options_ingestion', 'vol_surface', 'options_pricing',
+      'options_greeks', 'options_flow', 'options_technical', 'options_risk', 'governance']) {
+      expect(analysts).toContain(id);
+    }
+  }, 20000);
+
+  it('options-intraday parallel vs serial yields the same traces (parity)', async () => {
+    const serial = await new AgencyGraph(AGENCIES['options-intraday']!, { parallel: false }).execute(seedState());
+    const parallel = await new AgencyGraph(AGENCIES['options-intraday']!, { parallel: true }).execute(seedState());
+    const sTraces = (serial.analystTraces ?? []).map((t: any) => t.analyst).sort();
+    const pTraces = (parallel.analystTraces ?? []).map((t: any) => t.analyst).sort();
+    expect(pTraces).toEqual(sTraces);
+    expect(parallel.final_decision).toBe(serial.final_decision);
+  }, 20000);
 });

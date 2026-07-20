@@ -526,7 +526,16 @@ export const ANALYST_DEFS: Record<string, AnalystDef> = {
     accent: '#8b5cf6',
     monogram: 'OP',
     prompt: OPTIONS_INSTRUCTIONS.options_pricing,
-    dependsOn: ['options_ingestion', 'vol_surface'],
+    // NOTE: dependsOn is ONLY `options_ingestion` (not `vol_surface`). The
+    // pricing `compute` reads the option chain + re-derived greeks straight off
+    // ingestion and never consumes `vol_surface_analysis`, so a vol_surface
+    // dependency would create a MIXED-DEPTH fan-in (ingestion=depth1,
+    // vol_surface=depth2) that the parallel wiring rejects (Pregel would
+    // re-execute pricing per super-step and duplicate its trace). Keeping this
+    // shallow lets all stage-2 options analysts run concurrently after
+    // ingestion — same as the equity pipeline. If pricing is later enhanced to
+    // read the surface, re-add `vol_surface` AND accept the serial pair.
+    dependsOn: ['options_ingestion'],
     dataSources: [{ from: 'options_ingestion', fields: ['option_chain', 'greeks'], label: 'Chain + greeks', sources: ['Polygon Options (mock)'] }],
     features: [
       { key: 'edge_pct', label: 'Edge %', source: 'dataSources.0', aggregation: 'last' },
