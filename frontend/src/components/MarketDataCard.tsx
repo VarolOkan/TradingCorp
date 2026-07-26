@@ -16,6 +16,7 @@ import { getOptionChain, type OptionChainResult, type OptionQuote } from '../api
 import { getNews, type NewsResult, sentimentClass } from '../api/newsClient';
 import { type AgencyId, isIntradayAgency, DEFAULT_AGENCY } from './analysts/agencies';
 import { useWatchlist } from '../lib/watchlist';
+import Options3DView from './Options3DView';
 
 export interface MarketDataCardProps {
   symbol: string;
@@ -113,6 +114,9 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
   const [expiry, setExpiry] = useState<string>('');
   // Options table layout: 'all' = CALLS + PUTS, 'calls' = calls only, 'puts' = puts only.
   const [optSide, setOptSide] = useState<'all' | 'calls' | 'puts'>('all');
+  // Options view mode: 'table' = WeBull-style chain, '3d' = 3D bar chart.
+  const [optView, setOptView] = useState<'table' | '3d'>('table');
+  const [opt3dFullscreen, setOpt3dFullscreen] = useState(false);
   // Two independent toggles: toggling CALLS off when both are on -> 'puts';
   // toggling it back on -> 'all'. Same for PUTS. At least one always stays on.
   const toggleSide = (cur: 'all' | 'calls' | 'puts', which: 'calls' | 'puts'): 'all' | 'calls' | 'puts' => {
@@ -465,12 +469,22 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
             {!optErr && opt && (
               <>
                 <header className="history-head" data-testid="history-head">
-                  {/* [CALLS][PUTS] toggle pinned to the FAR LEFT of the header row. */}
+                  {/* [CALLS][PUTS][3D VIEW] toggle pinned to the FAR LEFT of the header row. */}
                   <div className="options-toolbar" data-testid="options-toolbar">
                     <div className="options-side-toggle" data-testid="options-side-toggle" role="group" aria-label="Show calls or puts">
                       <button type="button" aria-pressed={optSide === 'all' || optSide === 'calls'} className={optSide === 'all' || optSide === 'calls' ? 'active' : ''} onClick={() => setOptSide((s) => toggleSide(s, 'calls'))} data-testid="side-calls">CALLS</button>
                       <button type="button" aria-pressed={optSide === 'all' || optSide === 'puts'} className={optSide === 'all' || optSide === 'puts' ? 'active' : ''} onClick={() => setOptSide((s) => toggleSide(s, 'puts'))} data-testid="side-puts">PUTS</button>
                     </div>
+                    <button
+                      type="button"
+                      className={`options-view-toggle ${optView === '3d' ? 'active' : ''}`}
+                      aria-pressed={optView === '3d'}
+                      onClick={() => setOptView((v) => v === '3d' ? 'table' : '3d')}
+                      data-testid="side-3dview"
+                    >
+                      3D VIEW
+                    </button>
+
                   </div>
                   {/* Meta cluster (spot / source / delay + expiry selector) pushed to
                       the FAR RIGHT of the same row. */}
@@ -516,8 +530,19 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
                 {/* Unified options table (WeBull-style): greeks merged per row,
                     two independent CALLS / PUTS toggles (at least one on), strike
                     header shown once (top, between the panes), the two panes scroll
-                    horizontally in sync, ITM/OTM row tinting. */}
-                {(() => {
+                    horizontally in sync, ITM/OTM row tinting. When [3D VIEW] is
+                    active, the 3D bar chart replaces the table. */}
+                {optView === '3d' ? (
+                  <div className={`options-3d-wrapper ${opt3dFullscreen ? 'options-3d-fullscreen-wrapper' : ''}`} data-testid="options-3d-wrapper">
+                    <Options3DView
+                      chain={opt}
+                      expiry={expiry}
+                      fullscreen={opt3dFullscreen}
+                      onExitFullscreen={() => setOpt3dFullscreen(false)}
+                      onToggleFullscreen={() => setOpt3dFullscreen((f) => !f)}
+                    />
+                  </div>
+                ) : (() => {
                   const greekMap = new Map<string, any>();
                   for (const g of opt.greeks ?? []) {
                     if (g.expiry === expiry) greekMap.set(`${g.type}-${g.strike}`, g);
@@ -526,6 +551,8 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
                   const minDist = Math.min(...optRows.map((r) => Math.abs(r.strike - opt.underlying_price)));
                   const showCall = optSide === 'all' || optSide === 'calls';
                   const showPut = optSide === 'all' || optSide === 'puts';
+                  // Max volume across visible rows for volume bar scaling.
+                  const maxVolume = Math.max(...optRows.map((r) => r.volume || 0), 1);
                   // Column models. Same 8 fields for both sides. Header `label`
                   // shows the Greek symbol + a short english abbrev so the dense
                   // columns stay narrow but readable (hover `title` for the full
@@ -629,10 +656,21 @@ export function MarketDataCard({ symbol, agencyId = DEFAULT_AGENCY, technical, s
                           const q = optRows.find((r) => r.type === which && r.strike === strike);
                           const g = q ? greekMap.get(`${which}-${strike}`) : undefined;
                           const isAtm = opt.underlying_price > 0 && Math.abs(strike - opt.underlying_price) <= minDist;
+                          const vol = q?.volume ?? 0;
+                          const volPct = maxVolume > 0 ? (vol / maxVolume) * 100 : 0;
+                          const volColor = which === 'C' ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)';
                           return (
                             <tr key={strike} className={`${isAtm ? 'ochain-atm' : ''} ${itmClass(which, strike)}`} data-testid="ochain-row">
-                              {cols.map((col) => (
-                                <td key={col.key} className={valClass}>{q ? col.get(q, g) : '—'}</td>
+                              {cols.map((col, ci) => (
+                                <td
+                                  key={col.key}
+                                  className={valClass}
+                                  style={
+                                    ci === 0
+                                      ? { background: vol > 0 ? `linear-gradient(${which === 'C' ? 'to left' : 'to right'}, ${volColor} ${volPct}%, transparent ${volPct}%)` : undefined }
+                                      : undefined
+                                  }
+                                >{q ? col.get(q, g) : '—'}</td>
                               ))}
                             </tr>
                           );

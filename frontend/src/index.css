@@ -2790,6 +2790,289 @@ body {
   color: #f8fafc;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.3);
 }
+/* [3D VIEW] toggle button: visually distinct from the CALLS/PUTS pill,
+   sits beside it in the options toolbar. */
+.options-view-toggle {
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.options-view-toggle:hover { color: #e2e8f0; border-color: rgba(148, 163, 184, 0.4); }
+.options-view-toggle.active {
+  background: #4fc3f7;
+  color: #1a1a2e;
+  border-color: #4fc3f7;
+}
+/* 3D view wrapper — fills the remaining card height when active. */
+.options-3d-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.options-3d-fullscreen-wrapper {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: #0b1220;
+}
+/* ── Options3DView component ─────────────────────────────────────── */
+/* ── 3D View — expbar top, then body (sidebar overlay + canvas) ── */
+.options-3d-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #1a1a2e;
+  border-radius: 8px;
+}
+.options-3d-view.options-3d-fullscreen {
+  border-radius: 0;
+}
+
+/* Body: sidebar overlay + canvas, fills remaining height */
+.options-3d-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Left sidebar — mirrors POC #controls, overlays the canvas */
+.options-3d-sidebar-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 220px;
+  z-index: 20;
+}
+.options-3d-sidebar {
+  position: relative;
+  z-index: 10;
+  width: 220px;
+  height: 100%;
+  flex-shrink: 0;
+  background: rgba(26, 26, 46, 0.95);
+  border-right: 1px solid #333;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  overflow-y: auto;
+  backdrop-filter: blur(10px);
+  transition: transform 0.3s ease;
+}
+.options-3d-body.collapsed .options-3d-sidebar {
+  transform: translateX(-220px);
+}
+.options-3d-sidebar-title {
+  font-size: 14px;
+  color: #4fc3f7;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* Collapse toggle button — absolute within body, shifts with sidebar */
+.options-3d-collapse-btn {
+  position: absolute;
+  top: 50%;
+  left: 220px;
+  z-index: 30;
+  transform: translateY(-50%);
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid #333;
+  border-radius: 0 6px 6px 0;
+  padding: 18px 10px;
+  color: #4fc3f7;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  transition: left 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+.options-3d-collapse-btn:hover { background: rgba(40, 40, 70, 0.95); color: #81d4fa; }
+.options-3d-body.collapsed .options-3d-collapse-btn {
+  left: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+/* Expiry slider bar — full width at top */
+.options-3d-expbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(26, 26, 46, 0.95);
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+.options-3d-expbar-label {
+  font-size: 11px;
+  color: #4fc3f7;
+  font-weight: 600;
+  min-width: 70px;
+  white-space: nowrap;
+}
+.options-3d-expbar-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #2a2a4a;
+  border-radius: 3px;
+  outline: none;
+}
+.options-3d-expbar-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  cursor: pointer;
+  border: 2px solid #1a1a2e;
+}
+.options-3d-expbar-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  cursor: pointer;
+  border: 2px solid #1a1a2e;
+}
+
+/* Canvas wrap fills remaining space */
+.options-3d-canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+/* ── Sidebar controls ─────────────────────────────────────────── */
+.options-3d-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: #888;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.options-3d-label select,
+.options-3d-label input {
+  width: 100%;
+  padding: 6px;
+  background: #2a2a4a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #eee;
+  font-size: 12px;
+}
+.options-3d-pillar-val {
+  display: inline;
+  font-size: 11px;
+  color: #4fc3f7;
+  font-weight: 700;
+}
+.options-3d-slider {
+  accent-color: #4fc3f7;
+}
+.options-3d-btn {
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.options-3d-btn.secondary {
+  background: #333;
+  color: #eee;
+}
+.options-3d-btn.secondary:hover { background: #444; }
+.options-3d-btn.active-toggle { background: #ff9800; color: #1a1a2e; }
+.options-3d-exit-fullscreen {
+  background: #4fc3f7;
+  color: #1a1a2e;
+  margin-top: 4px;
+}
+.options-3d-exit-fullscreen:hover { background: #81d4fa; }
+
+
+/* ── Legend (floating, bottom-right of canvas) ────────────────── */
+.options-3d-legend {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 10;
+  background: rgba(26, 26, 46, 0.9);
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 11px;
+}
+.options-3d-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.options-3d-legend-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.options-3d-hint {
+  color: #666;
+  font-size: 9px;
+  margin-top: 6px;
+  border-top: 1px solid #333;
+  padding-top: 4px;
+  line-height: 1.5;
+}
+.options-3d-container {
+  position: absolute;
+  inset: 0;
+}
+.options-3d-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+.options-3d-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  z-index: 5;
+  color: #4fc3f7;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(26, 26, 46, 0.8);
+}
+.options-3d-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #4fc3f7;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin3d 0.8s linear infinite;
+}
+@keyframes spin3d { to { transform: rotate(360deg); } }
 /* The three columns: call pane | strike | put pane. The two value panes scroll
    vertically AND horizontally on their own (synced via JS); the strike column
    scrolls vertically; the pinned header rows (CALLS/Strike/PUTS + greek labels)
